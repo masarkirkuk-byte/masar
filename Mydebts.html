@@ -111,7 +111,7 @@
       const d=new Date();
       const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       b.innerHTML = `
-        <h3 style="text-align:center; margin-bottom:8px">📊 تقرير شهري VIP</h3>
+        <h3 style="text-align:center; margin-bottom:8px">📊 تقرير شهري</h3>
         <div class="advanced-filter" style="margin-bottom:10px">
           <div class="filter-row">
             <input type="month" id="vipMonth" class="filter-input" value="${ym}">
@@ -343,6 +343,15 @@
 #dateDisplay{font-size:1.05rem !important; font-weight:800 !important;}
 
 </style>
+
+<style>
+#liveTime {
+    display: inline-block;
+    padding-bottom: 6px;
+    border-bottom: 1px solid black;
+}
+</style>
+
 </head>
 <body>
 
@@ -360,7 +369,7 @@
     <!-- Header -->
     <div class="app-header">
         <div class="header-left">
-            <button class="header-btn" onclick="nav('main')" title="الصفحة الرئيسية">🏠 <span>مسار</span></button>
+            <button class="header-btn" onclick="nav('main')" title="الصفحة الرئيسية">🏠 <span>⬅ رجوع</span></button>
 </div>
 
         <div class="header-center">
@@ -392,7 +401,7 @@
             <button class="menu-btn" style="background:#475569" onclick="nav('logs')">📋 سجل النشاطات</button>
 
             <!-- الصف الثالث -->
-            <button class="menu-btn" style="background:#111827" onclick="openVipModal()">📊 تقرير شهري VIP</button>
+            <button class="menu-btn" style="background:#111827" onclick="openVipModal()">📊 تقرير شهري</button>
             <button class="menu-btn" style="background:#ef4444" onclick="openLateModal()">🚨 المتأخرين</button>
 
             <!-- اخر شي -->
@@ -699,7 +708,7 @@
                 else document.getElementById('loginScreen').style.display = 'flex';
             });
         } else {
-            db.ref('users/admin').set({username:'admin', pass:'Orhan1989', role:'admin', blocked:false});
+            db.ref('users/admin').set({username:'admin', pass:'19891989', role:'admin', blocked:false});
             document.getElementById('loginScreen').style.display = 'flex';
         }
     }
@@ -1539,7 +1548,7 @@
       const d=new Date();
       const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       b.innerHTML = `
-        <h3 style="text-align:center; margin-bottom:8px">📊 تقرير شهري VIP</h3>
+        <h3 style="text-align:center; margin-bottom:8px">📊 تقرير شهري</h3>
         <div class="advanced-filter" style="margin-bottom:10px">
           <div class="filter-row">
             <input type="month" id="vipMonth" class="filter-input" value="${ym}">
@@ -1823,6 +1832,12 @@ setTimeout(addWAButton, 1600);
 
 })();
 </script>
+
+
+<div style="text-align:center;margin-top:40px;padding:15px;
+font-size:14px;color:#555;">
+جميع الحقوق المحفوظة لشركة المسار 2026 ©<br>المصمم اورهان
+</div>
 
 </body>
 </html>
@@ -4230,6 +4245,5 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
 })();
 </script>
 <!-- ====================== END VIP PACK ====================== -->
-
 
 
