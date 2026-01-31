@@ -1687,142 +1687,142 @@
 </script>
 
 
-<script>
-
-
-
 
 <script>
-// ===== FINAL WhatsApp Message Builder (API SEND + SAFE ENCODE) =====
+// ===== WhatsApp Desktop FIX (copy + open) =====
 (function(){
 
-function buildStatementMessage(agent){
-    const name = agent && agent.name ? agent.name : '';
-    const phone = agent && agent.phone ? agent.phone : '';
-    let totalDebt = 0, totalPay = 0;
-
-    // Support multiple possible field names
-    const transObj = (agent && (agent.trans || agent.transactions || agent.moves)) ? (agent.trans || agent.transactions || agent.moves) : null;
-
-    if(transObj){
-        Object.values(transObj).forEach(t=>{
-            const type = (t.type || t.kind || '').toString().toLowerCase();
-            const amt = Number(t.amt ?? t.amount ?? t.value ?? 0) || 0;
-            if(type === 'debt' || type === 'دين') totalDebt += amt;
-            if(type === 'pay'  || type === 'تسديد') totalPay  += amt;
-        });
+function copyText(text){
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(text);
     }
+  }catch(e){}
+  return new Promise((resolve,reject)=>{
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=text;
+      ta.style.position='fixed';
+      ta.style.top='-1000px';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      resolve();
+    }catch(err){ reject(err); }
+  });
+}
 
-    const balance = totalDebt - totalPay;
-    const now = new Date().toLocaleString('en-GB');
+function buildMsg(agent){
+  const name = agent.name || '';
+  const phoneRaw = agent.phone || '';
+  let totalDebt=0, totalPay=0;
 
-    // Arabic-only template (no emojis to avoid WhatsApp stripping on some clients)
-    const msg =
+  if(agent.trans){
+    Object.values(agent.trans).forEach(t=>{
+      const amt = parseFloat(t.amt ?? t.amount ?? 0) || 0;
+      const type = (t.type||'').toLowerCase();
+      if(type==='debt') totalDebt += amt;
+      if(type==='pay') totalPay += amt;
+    });
+  }
+
+  const balance = totalDebt - totalPay;
+  const now = new Date().toLocaleString('en-GB');
+
+  return (
 `شبكة المسار لخدمات الإنترنت
 كركوك – مقابل نفق دوميز – جوار جامع الأحمدي
 
 اسم الوكيل: ${name}
-رقم الوكيل: ${phone}
 
-مجموع الديون: ${totalDebt.toLocaleString()} د.ع
-مجموع التسديد: ${totalPay.toLocaleString()} د.ع
+إجمالي الديون: ${totalDebt.toLocaleString()} د.ع
+إجمالي التسديد: ${totalPay.toLocaleString()} د.ع
 الرصيد الحالي: ${balance.toLocaleString()} د.ع
 
 وقت الإرسال: ${now}
 
-تم إنشاء هذه الرسالة تلقائياً من نظام المسار نت`;
-
-    return msg;
+تم إنشاء هذه الرسالة تلقائياً من نظام المسار نت`
+  );
 }
 
-function normalizePhone(raw){
-    let phone = (raw || '').toString().trim();
-    // remove spaces and non-digits
-    phone = phone.replace(/\D/g,'');
-    // if starts with 0 (Iraq local), convert to 964
-    if(phone.startsWith('0')) phone = '964' + phone.slice(1);
-    // if user entered +964, remove +
-    if(phone.startsWith('9640')) phone = '964' + phone.slice(4);
-    return phone;
+function normPhone(p){
+  p = String(p||'').trim();
+  p = p.replace(/\s+/g,'').replace(/^\+/, '').replace(/^00/, '');
+  // Iraq common formats
+  if(/^0\d+/.test(p)) p = '964' + p.substring(1);
+  if(/^7\d{8,}$/.test(p)) p = '964' + p;
+  p = p.replace(/\D/g,'');
+  return p;
 }
 
-function openWhatsApp(phone, message){
-    const text = encodeURIComponent(message || '');
-    // Use api.whatsapp.com which is more tolerant across desktop/mobile
-    const url = "https://api.whatsapp.com/send?phone=" + phone + "&text=" + text;
-    window.open(url, "_blank");
-}
+function openDesktopWA(phone, text){
+  const p = normPhone(phone);
+  if(!p){ alert('رقم الهاتف غير صالح'); return; }
 
-function copyToClipboard(text){
-    try{
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.setAttribute('readonly','');
-        ta.style.position='fixed';
-        ta.style.opacity='0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        return true;
-    }catch(e){
-        return false;
-    }
+  // 1) Try whatsapp:// (Desktop app handler)
+  const url1 = `whatsapp://send?phone=${p}&text=${encodeURIComponent(text)}`;
+  // 2) Fallback to web handler
+  const url2 = `https://api.whatsapp.com/send?phone=${p}&text=${encodeURIComponent(text)}`;
+  // 3) Minimal open chat (if text ignored) - still okay because we copied it
+  const url3 = `https://api.whatsapp.com/send?phone=${p}`;
+
+  try{
+    window.location.href = url1;
+    setTimeout(()=>{ window.open(url2, '_blank'); }, 600);
+    setTimeout(()=>{ window.open(url3, '_blank'); }, 1200);
+  }catch(e){
+    window.open(url2, '_blank');
+  }
 }
 
 function addWAButton(){
-    if(document.getElementById('masarWABtnFinal2')) return;
+  if(document.getElementById('cleanWABtnDesktopFix')) return;
 
-    const statementBtn = Array.from(document.querySelectorAll('button'))
-        .find(b => (b.textContent || '').includes('كشف'));
+  const statementBtn = Array.from(document.querySelectorAll('button'))
+    .find(b => (b.textContent||'').includes('كشف'));
 
-    if(!statementBtn) return;
+  if(!statementBtn) return;
 
-    const btn = document.createElement('button');
-    btn.id = 'masarWABtnFinal2';
-    btn.textContent = 'إرسال واتساب';
-    btn.className = statementBtn.className;
-    btn.style.background = '#16a34a';
-    btn.style.marginInlineStart = '6px';
+  const btn = document.createElement('button');
+  btn.id = 'cleanWABtnDesktopFix';
+  btn.textContent = '📲 إرسال كشف حساب';
+  btn.className = statementBtn.className;
+  btn.style.background = '#16a34a';
+  btn.style.marginInlineStart = '6px';
 
-    btn.onclick = function(){
-        if(typeof currentAgent === 'undefined' || !currentAgent){
-            alert("لم يتم العثور على بيانات الوكيل");
-            return;
-        }
-        const phone = normalizePhone(currentAgent.phone);
-        if(!phone){
-            alert("رقم الهاتف غير صالح");
-            return;
-        }
-        const message = buildStatementMessage(currentAgent);
+  btn.onclick = async function(){
+    try{
+      if(typeof currentAgent === 'undefined' || !currentAgent){
+        alert('افتح صفحة وكيل أولاً');
+        return;
+      }
+      const msg = buildMsg(currentAgent);
+      await copyText(msg);
+      // Inform user to paste if WA opens without text
+      try{ 
+        if(typeof toast === 'function') toast('تم نسخ الرسالة — إذا فتح واتساب بدون نص اضغط Ctrl+V');
+      }catch(e){}
+      alert('تم نسخ الرسالة. إذا فتح واتساب بدون نص: اضغط Ctrl+V للصق الرسالة.');
+      openDesktopWA(currentAgent.phone || '', msg);
+    }catch(e){
+      console.log(e);
+      alert('صار خطأ أثناء تجهيز رسالة الواتساب');
+    }
+  };
 
-        // Always copy so user can paste even if WhatsApp client ignores text
-        const copied = copyToClipboard(message);
-
-        openWhatsApp(phone, message);
-
-        if(copied){
-            // small non-blocking hint
-            setTimeout(()=> {
-                try{ console.log("تم نسخ نص الرسالة للحافظة"); }catch(e){}
-            }, 50);
-        }
-    };
-
-    statementBtn.parentNode.insertBefore(btn, statementBtn.nextSibling);
+  statementBtn.parentNode.insertBefore(btn, statementBtn.nextSibling);
 }
 
 if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', ()=>setTimeout(addWAButton,800));
+  document.addEventListener('DOMContentLoaded', ()=>setTimeout(addWAButton, 700));
 }else{
-    setTimeout(addWAButton,800);
+  setTimeout(addWAButton, 700);
 }
-setTimeout(addWAButton,1600);
+setTimeout(addWAButton, 1600);
 
 })();
 </script>
-
 
 </body>
 </html>
