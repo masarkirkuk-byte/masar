@@ -6,7 +6,203 @@
     <title>نظام المسار نت - V62 (Dashboard + Reports PDF + Agents Backup + PWA)</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js">
+/* === VIP ADDONS (Stage 3) - safe wrapper === */
+(function(){
+  try{
+    window.nextVoucher = function(prefix){
+      prefix = prefix || 'MASAR';
+      const key = 'masar_voucher_seq';
+      const seq = (parseInt(localStorage.getItem(key)||'0',10) || 0) + 1;
+      localStorage.setItem(key, String(seq));
+      const y = new Date().getFullYear();
+      return `${prefix}-${y}-${String(seq).padStart(6,'0')}`;
+    };
+
+    window.safeNum = function(v){
+      const n = parseFloat(String(v||'').replace(/,/g,''));
+      return isNaN(n)?0:n;
+    };
+
+    window.iqd = function(n){
+      try{ return (safeNum(n)).toLocaleString('en-US'); }catch(e){ return String(n||0); }
+    };
+  }catch(e){ console.log(e); }
+})();
+
+
+/* === Late Agents + VIP Monthly Report (Modal) === */
+(function(){
+  try{
+    function closeModalSafe(){ try{ closeModal(); }catch(e){ document.getElementById('modal').style.display='none'; } }
+
+    window.openLateModal = function(){
+      const m=document.getElementById('modal'), b=document.getElementById('modalBody');
+      m.style.display='flex';
+      b.innerHTML = `
+        <h3 style="text-align:center; margin-bottom:8px">🚨 المتأخرين</h3>
+        <div class="advanced-filter" style="margin-bottom:10px">
+          <div class="filter-row">
+            <input type="number" id="lateDays" class="filter-input" placeholder="تأخر أكثر من (أيام)" value="14">
+            <input type="number" id="lateMinBal" class="filter-input" placeholder="رصيد أكبر من (دينار)" value="500000">
+          </div>
+        </div>
+        <button class="btn-main" style="background:#111827" onclick="renderLateList()">عرض القائمة</button>
+        <div id="lateListBox" class="list-container" style="margin-top:10px; max-height:50vh; overflow:auto"></div>
+        <button class="btn-main" style="background:#ccc; margin-top:10px" onclick="closeModalSafe()">إغلاق</button>
+      `;
+      setTimeout(()=>{ window.renderLateList(); }, 50);
+    };
+
+    window.renderLateList = function(){
+      const box=document.getElementById('lateListBox'); if(!box) return;
+      box.innerHTML='';
+      const days=parseInt(document.getElementById('lateDays').value||'14',10);
+      const minBal=safeNum(document.getElementById('lateMinBal').value||'0');
+      const now=Date.now();
+      const ms=days*24*60*60*1000;
+
+      const res=(window.agents||[]).map(a=>{
+        let bal=0;
+        try{ bal = calcAgentBalance(a); }catch(e){
+          // fallback calc
+          if(a && a.trans){
+            Object.values(a.trans).forEach(t=>{
+              const amt=safeNum(t.amt);
+              if(t.type==='debt') bal += amt; else bal -= amt;
+            });
+          }
+        }
+        let last=0;
+        try{
+          if(a && a.trans){
+            Object.values(a.trans).forEach(t=>{
+              const tt = new Date(t.date||0).getTime();
+              if(tt>last) last=tt;
+            });
+          }
+        }catch(e){}
+        return {...a, _bal: bal, _last: last};
+      }).filter(a=> a._bal>=minBal && (a._last===0 || (now-a._last)>=ms))
+        .sort((a,b)=> b._bal-a._bal);
+
+      if(res.length===0){
+        box.innerHTML = '<div style="text-align:center; padding:14px; color:gray">لا توجد حالات حسب الفلتر</div>';
+        return;
+      }
+
+      res.forEach(a=>{
+        box.innerHTML += `
+          <div class="list-item" style="cursor:pointer" onclick="try{openDetails('${a.id}')}catch(e){}">
+            <div class="item-details">
+              <h4>${a.name||''}</h4>
+              <p>${a.phone||''} | ${a.address||''}</p>
+              <p style="margin:2px 0 0 0; font-size:0.75rem; color:#94a3b8">آخر حركة: ${a._last?new Date(a._last).toLocaleDateString('en-GB'):'--'}</p>
+            </div>
+            <div style="text-align:left; font-weight:900; color:var(--red)">${iqd(a._bal)}</div>
+          </div>
+        `;
+      });
+    };
+
+    window.openVipModal = function(){
+      const m=document.getElementById('modal'), b=document.getElementById('modalBody');
+      m.style.display='flex';
+      const d=new Date();
+      const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      b.innerHTML = `
+        <h3 style="text-align:center; margin-bottom:8px">📊 تقرير شهري VIP</h3>
+        <div class="advanced-filter" style="margin-bottom:10px">
+          <div class="filter-row">
+            <input type="month" id="vipMonth" class="filter-input" value="${ym}">
+            <button class="btn-main btn-primary" style="max-width:160px" onclick="renderVipMonthly()">عرض</button>
+          </div>
+        </div>
+        <div id="vipBox"></div>
+        <button class="btn-main" style="background:#ccc; margin-top:10px" onclick="closeModalSafe()">إغلاق</button>
+      `;
+      setTimeout(()=>{ window.renderVipMonthly(); }, 50);
+    };
+
+    window.renderVipMonthly = function(){
+      const ym=document.getElementById('vipMonth').value;
+      if(!ym) return;
+      const y=parseInt(ym.split('-')[0],10), m=parseInt(ym.split('-')[1],10)-1;
+      const start=new Date(y,m,1);
+      const end=new Date(y,m+1,1);
+      const from=start.toISOString().slice(0,10);
+      const to=new Date(end.getTime()-1).toISOString().slice(0,10);
+
+      let debt=0, paid=0, exp=0;
+
+      (window.agents||[]).forEach(a=>{
+        if(!a.trans) return;
+        Object.values(a.trans).forEach(t=>{
+          const d=(t.date||'').split('T')[0];
+          if(d>=from && d<=to){
+            const amt=safeNum(t.amt);
+            if(t.type==='debt') debt+=amt; else paid+=amt;
+          }
+        });
+      });
+
+      (window.expenses||[]).forEach(e=>{
+        const d=(e.date||'').split('T')[0];
+        if(d>=from && d<=to) exp += safeNum(e.amount);
+      });
+
+      const net = paid - exp;
+
+      // top 10 by current balance
+      const top=(window.agents||[]).map(a=>{
+        let bal=0;
+        try{ bal = calcAgentBalance(a); }catch(e){
+          if(a && a.trans){
+            Object.values(a.trans).forEach(t=>{
+              const amt=safeNum(t.amt);
+              if(t.type==='debt') bal += amt; else bal -= amt;
+            });
+          }
+        }
+        return {name:a.name||'', bal};
+      }).sort((a,b)=>b.bal-a.bal).slice(0,10);
+
+      // expenses by category
+      const cats={};
+      (window.expenses||[]).forEach(e=>{
+        const d=(e.date||'').split('T')[0];
+        if(d>=from && d<=to){
+          const c=e.category||'أخرى';
+          cats[c]=(cats[c]||0)+safeNum(e.amount);
+        }
+      });
+
+      const vip=document.getElementById('vipBox');
+      vip.innerHTML = `
+        <div class="stats-row" style="margin-bottom:10px">
+          <div class="stat-box"><span class="stat-label">ديون الشهر</span><span class="stat-val" style="color:var(--red)">${iqd(debt)}</span></div>
+          <div class="stat-box"><span class="stat-label">تسديد الشهر</span><span class="stat-val" style="color:var(--green)">${iqd(paid)}</span></div>
+          <div class="stat-box"><span class="stat-label">مصاريف الشهر</span><span class="stat-val" style="color:var(--orange)">${iqd(exp)}</span></div>
+          <div class="stat-box"><span class="stat-label">الصافي</span><span class="stat-val" style="color:#111827">${iqd(net)}</span></div>
+        </div>
+
+        <div class="list-container">
+          <div style="font-weight:900; margin-bottom:8px">أعلى 10 وكلاء مديونية (الرصيد الحالي)</div>
+          ${top.map((x,i)=>`<div class="list-item"><div>${i+1}. ${x.name}</div><div style="font-weight:900; color:var(--red)">${iqd(x.bal)}</div></div>`).join('')}
+        </div>
+
+        <div class="list-container" style="margin-top:10px">
+          <div style="font-weight:900; margin-bottom:8px">مصاريف حسب التصنيف (داخل الشهر)</div>
+          ${Object.keys(cats).length
+            ? Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="list-item"><div>${c}</div><div style="font-weight:900; color:var(--orange)">${iqd(v)}</div></div>`).join('')
+            : '<div style="text-align:center; padding:14px; color:gray">لا توجد مصاريف</div>'}
+        </div>
+      `;
+    };
+  }catch(e){ console.log(e); }
+})();
+
+</script>
 
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
@@ -72,8 +268,8 @@
         .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
         .dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
         .dot.offline { background: #ef4444; }
-        #clock { direction:ltr; font-weight:900; font-size:1.15rem; letter-spacing: .3px; }
-        #dateDisplay { font-size:0.85rem; opacity:0.85; }
+        #clock { direction:ltr; font-weight:900; font-size: 1.55rem; letter-spacing: .3px; }
+        #dateDisplay { font-size: 1.05rem; opacity:0.85; }
 
         /* القائمة - داشبود */
         .main-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
@@ -136,7 +332,12 @@
             .total-summary { grid-template-columns: 1fr; }
             .filter-row { flex-direction: column; }
         }
-    </style>
+    
+/* === FORCE MAIN MENU ORDER/LAYOUT === */
+.menu-grid{ display:grid !important; grid-template-columns:1fr 1fr !important; gap:10px !important; }
+.menu-grid .wide-btn{ grid-column:1 / -1 !important; }
+
+</style>
 </head>
 <body>
 
@@ -155,8 +356,7 @@
     <div class="app-header">
         <div class="header-left">
             <button class="header-btn" onclick="nav('main')" title="الصفحة الرئيسية">🏠 <span>مسار</span></button>
-            <button class="header-btn" onclick="location.reload()" title="تحديث">🔄 <span>تحديث</span></button>
-        </div>
+</div>
 
         <div class="header-center">
             <div class="status-badge">
@@ -177,15 +377,22 @@
     <div id="mainView" class="container">
         <div class="main-menu">
             <!-- صف 1 -->
+            
+            <!-- الصف الاول -->
             <button class="menu-btn" style="background:var(--purple)" onclick="nav('agents')">👥 الوكلاء</button>
             <button class="menu-btn" style="background:var(--orange)" onclick="nav('expenses')">💸 المصاريف</button>
 
-            <!-- صف 2 -->
+            <!-- الصف الثاني -->
             <button class="menu-btn" style="background:var(--dark)" onclick="nav('reports')">📄 التقارير</button>
             <button class="menu-btn" style="background:#475569" onclick="nav('logs')">📋 سجل النشاطات</button>
 
-            <!-- آخر شي صف كامل - للأدمن فقط -->
+            <!-- الصف الثالث -->
+            <button class="menu-btn" style="background:#111827" onclick="openVipModal()">📊 تقرير شهري VIP</button>
+            <button class="menu-btn" style="background:#ef4444" onclick="openLateModal()">🚨 المتأخرين</button>
+
+            <!-- اخر شي -->
             <button class="menu-btn wide-btn" style="background:var(--teal)" id="btnUsers" onclick="nav('users')">🔐 إدارة الحسابات</button>
+
         </div>
 
         <div class="section-header"><span style="color:var(--red)">📉 ديون عند الوكلاء</span></div>
@@ -672,7 +879,7 @@
                 <div class="list-item">
                     <div style="display:flex; align-items:center; gap:10px">
                         <span style="background:#fff7ed; color:#c2410c; width:25px; height:25px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:bold">${i+1}</span>
-                        <div class="item-details"><h4>${e.type}</h4><p>${new Date(e.date).toLocaleDateString('en-GB')} | ${e.note||''}</p></div>
+                        <div class="item-details"><h4>${e.type}</h4><p>${(e.category||'أخرى')} | ${new Date(e.date).toLocaleDateString('en-GB')} | ${e.note||''}</p><p style="margin:2px 0 0 0; font-size:0.75rem; color:#94a3b8">${e.voucherNo||''}</p></div>
                     </div>
                     <div style="text-align:left; display:flex; align-items:center">
                         <div style="font-weight:bold; color:var(--orange)">${fmt(e.amount)}</div>
@@ -745,7 +952,16 @@
             b.innerHTML = `<h3 style="text-align:center">مصروف جديد</h3>
                 <label class="form-label">التاريخ</label><input type="datetime-local" id="inExDate" class="app-input">
                 <label class="form-label">نوع الصرف</label><input id="inExType" class="app-input" placeholder="مثال: رواتب / ايجارات / يومي">
-                <label class="form-label">المبلغ</label><input id="inExAmt" class="app-input" onkeyup="fmtInput(this)">
+                <label class="form-label">تصنيف</label>
+<select id="inExCat" class="app-input">
+  <option value="رواتب">رواتب</option>
+  <option value="إيجار">إيجار</option>
+  <option value="صيانة">صيانة</option>
+  <option value="وقود">وقود</option>
+  <option value="إنترنت">إنترنت</option>
+  <option value="أخرى">أخرى</option>
+</select>
+<label class="form-label">المبلغ</label><input id="inExAmt" class="app-input" onkeyup="fmtInput(this)">
                 <label class="form-label">ملاحظات</label><input id="inExNote" class="app-input">
                 <button class="btn-main" style="background:var(--orange)" onclick="saveExp()">حفظ</button>
                 <button class="btn-main" style="background:#ccc; margin-top:5px" onclick="closeModal()">إلغاء</button>`;
@@ -779,7 +995,7 @@
         const t = document.getElementById('inExType').value;
         const a = parseFloat((document.getElementById('inExAmt').value||'').replace(/,/g,''));
         if(!t || isNaN(a)) return alert("أكمل نوع المصروف والمبلغ");
-        const obj = { type: t, amount: a, date: document.getElementById('inExDate').value, note: document.getElementById('inExNote').value };
+        const obj = { type: t, category: (document.getElementById('inExCat')?document.getElementById('inExCat').value:'أخرى'), amount: a, date: document.getElementById('inExDate').value, note: document.getElementById('inExNote').value, voucherNo: (window.nextVoucher?nextVoucher('MASAR-EX'): '') };
         if(editId) {
             db.ref('expenses/' + editId).update(obj).then(() => updateExpUI());
             log(`عدل مصروف: ${t}`);
@@ -828,6 +1044,7 @@
             document.getElementById('inExType').value = e.type;
             document.getElementById('inExAmt').value = fmt(e.amount);
             document.getElementById('inExNote').value = e.note||'';
+            try{ if(document.getElementById('inExCat')) document.getElementById('inExCat').value = e.category || 'أخرى'; }catch(_e){}
             let d = new Date(e.date); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
             document.getElementById('inExDate').value = d.toISOString().slice(0,16);
         }, 100);
@@ -868,7 +1085,7 @@
             list.innerHTML += `<div class="list-item">
                 <div>
                     <div style="font-weight:bold; color:${isD?'var(--red)':'var(--green)'}">${isD?'دين':'تسديد'}: ${fmt(t.amt)}</div>
-                    <small style="color:gray">${t.note || ''} | ${new Date(t.date).toLocaleDateString('en-GB')}</small>
+                    <small style="color:gray">${t.note || ''} | ${new Date(t.date).toLocaleDateString('en-GB')} | <span style="color:#94a3b8">${t.voucherNo||''}</span></small>
                 </div>
                 <button onclick="editTrans(${t.id}, '${t.type}')" class="action-btn-small" style="background:#fef3c7; color:#854d0e">✏️</button>
             </div>`;
@@ -912,7 +1129,7 @@
     function saveTrans(type) {
         const aVal = parseFloat((document.getElementById('inTrAmt').value||'').replace(/,/g,''));
         if(isNaN(aVal)) return alert("المبلغ مطلوب");
-        const obj = { type: type, amt: aVal, date: document.getElementById('inTrDate').value, note: document.getElementById('inTrNote').value };
+        const obj = { type: type, amt: aVal, date: document.getElementById('inTrDate').value, note: document.getElementById('inTrNote').value, voucherNo: (window.nextVoucher?nextVoucher(type==='debt'?'MASAR-D':'MASAR-P'): '') };
 
         const ag = agents.find(x => x.id == curAgentId);
         const oldBal = ag ? calcAgentBalance(ag) : 0;
@@ -1057,7 +1274,7 @@
                 t.innerHTML += `<tr>
                     <td>${new Date(x.date).toLocaleDateString()}</td>
                     <td>${isD?'دين':'تسديد'}</td>
-                    <td>${x.note||''}</td>
+                    <td>${x.note||''}${x.voucherNo?(' | '+x.voucherNo):''}</td>
                     <td>${isD?fmt(x.amt):'-'}</td>
                     <td>${!isD?fmt(x.amt):'-'}</td>
                 </tr>`;
@@ -1196,6 +1413,178 @@
         document.getElementById('clock').innerText = d.toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit'});
         document.getElementById('dateDisplay').innerText = d.toLocaleDateString('ar-EG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
     }, 1000);
+
+
+/* === VIP: late agents + monthly report + vouchers (stable) === */
+(function(){
+  try{
+    window.nextVoucher = window.nextVoucher || function(prefix){
+      prefix = prefix || 'MASAR';
+      const key='masar_voucher_seq';
+      const seq=(parseInt(localStorage.getItem(key)||'0',10)||0)+1;
+      localStorage.setItem(key, String(seq));
+      const y=new Date().getFullYear();
+      return `${prefix}-${y}-${String(seq).padStart(6,'0')}`;
+    };
+    window.safeNum = window.safeNum || function(v){
+      const n=parseFloat(String(v||'').replace(/,/g,''));
+      return isNaN(n)?0:n;
+    };
+    window.iqd = window.iqd || function(n){
+      return (safeNum(n)).toLocaleString('en-US');
+    };
+
+    window.openLateModal = function(){
+      const m=document.getElementById('modal'), b=document.getElementById('modalBody');
+      m.style.display='flex';
+      b.innerHTML = `
+        <h3 style="text-align:center; margin-bottom:8px">🚨 المتأخرين</h3>
+        <div class="advanced-filter" style="margin-bottom:10px">
+          <div class="filter-row">
+            <input type="number" id="lateDays" class="filter-input" placeholder="تأخر أكثر من (أيام)" value="14">
+            <input type="number" id="lateMinBal" class="filter-input" placeholder="رصيد أكبر من (دينار)" value="500000">
+          </div>
+        </div>
+        <button class="btn-main" style="background:#111827" onclick="renderLateList()">عرض القائمة</button>
+        <div id="lateListBox" class="list-container" style="margin-top:10px; max-height:50vh; overflow:auto"></div>
+        <button class="btn-main" style="background:#ccc; margin-top:10px" onclick="closeModal()">إغلاق</button>
+      `;
+      setTimeout(()=>{ renderLateList(); }, 50);
+    };
+
+    window.renderLateList = function(){
+      const box=document.getElementById('lateListBox'); if(!box) return;
+      box.innerHTML='';
+      const days=parseInt(document.getElementById('lateDays').value||'14',10);
+      const minBal=safeNum(document.getElementById('lateMinBal').value||'0');
+      const now=Date.now(), ms=days*24*60*60*1000;
+
+      const res=(window.agents||[]).map(a=>{
+        let bal=0;
+        if(a && a.trans){
+          Object.values(a.trans).forEach(t=>{
+            const amt=safeNum(t.amt);
+            if(t.type==='debt') bal+=amt; else bal-=amt;
+          });
+        }
+        let last=0;
+        if(a && a.trans){
+          Object.values(a.trans).forEach(t=>{
+            const tt=new Date(t.date||0).getTime();
+            if(tt>last) last=tt;
+          });
+        }
+        return {...a,_bal:bal,_last:last};
+      }).filter(a=> a._bal>=minBal && (a._last===0 || (now-a._last)>=ms))
+        .sort((a,b)=> b._bal-a._bal);
+
+      if(!res.length){
+        box.innerHTML='<div style="text-align:center; padding:14px; color:gray">لا توجد حالات حسب الفلتر</div>';
+        return;
+      }
+
+      res.forEach(a=>{
+        box.innerHTML += `
+          <div class="list-item" style="cursor:pointer" onclick="try{openDetails('${a.id}')}catch(e){}">
+            <div class="item-details">
+              <h4>${a.name||''}</h4>
+              <p>${a.phone||''} | ${a.address||''}</p>
+              <p style="margin:2px 0 0 0; font-size:0.75rem; color:#94a3b8">آخر حركة: ${a._last?new Date(a._last).toLocaleDateString('en-GB'):'--'}</p>
+            </div>
+            <div style="text-align:left; font-weight:900; color:var(--red)">${iqd(a._bal)}</div>
+          </div>
+        `;
+      });
+    };
+
+    window.openVipModal = function(){
+      const m=document.getElementById('modal'), b=document.getElementById('modalBody');
+      m.style.display='flex';
+      const d=new Date();
+      const ym=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      b.innerHTML = `
+        <h3 style="text-align:center; margin-bottom:8px">📊 تقرير شهري VIP</h3>
+        <div class="advanced-filter" style="margin-bottom:10px">
+          <div class="filter-row">
+            <input type="month" id="vipMonth" class="filter-input" value="${ym}">
+            <button class="btn-main btn-primary" style="max-width:160px" onclick="renderVipMonthly()">عرض</button>
+          </div>
+        </div>
+        <div id="vipBox"></div>
+        <button class="btn-main" style="background:#ccc; margin-top:10px" onclick="closeModal()">إغلاق</button>
+      `;
+      setTimeout(()=>{ renderVipMonthly(); }, 50);
+    };
+
+    window.renderVipMonthly = function(){
+      const ym=document.getElementById('vipMonth').value;
+      if(!ym) return;
+      const y=parseInt(ym.split('-')[0],10), m=parseInt(ym.split('-')[1],10)-1;
+      const start=new Date(y,m,1), end=new Date(y,m+1,1);
+      const from=start.toISOString().slice(0,10);
+      const to=new Date(end.getTime()-1).toISOString().slice(0,10);
+
+      let debt=0, paid=0, exp=0;
+      (window.agents||[]).forEach(a=>{
+        if(!a.trans) return;
+        Object.values(a.trans).forEach(t=>{
+          const d=(t.date||'').split('T')[0];
+          if(d>=from && d<=to){
+            const amt=safeNum(t.amt);
+            if(t.type==='debt') debt+=amt; else paid+=amt;
+          }
+        });
+      });
+      (window.expenses||[]).forEach(e=>{
+        const d=(e.date||'').split('T')[0];
+        if(d>=from && d<=to) exp += safeNum(e.amount);
+      });
+
+      const net = paid - exp;
+      const top=(window.agents||[]).map(a=>{
+        let bal=0;
+        if(a && a.trans){
+          Object.values(a.trans).forEach(t=>{
+            const amt=safeNum(t.amt);
+            if(t.type==='debt') bal+=amt; else bal-=amt;
+          });
+        }
+        return {name:a.name||'', bal};
+      }).sort((a,b)=>b.bal-a.bal).slice(0,10);
+
+      const cats={};
+      (window.expenses||[]).forEach(e=>{
+        const d=(e.date||'').split('T')[0];
+        if(d>=from && d<=to){
+          const c=e.category||'أخرى';
+          cats[c]=(cats[c]||0)+safeNum(e.amount);
+        }
+      });
+
+      document.getElementById('vipBox').innerHTML = `
+        <div class="stats-row" style="margin-bottom:10px">
+          <div class="stat-box"><span class="stat-label">ديون الشهر</span><span class="stat-val" style="color:var(--red)">${iqd(debt)}</span></div>
+          <div class="stat-box"><span class="stat-label">تسديد الشهر</span><span class="stat-val" style="color:var(--green)">${iqd(paid)}</span></div>
+          <div class="stat-box"><span class="stat-label">مصاريف الشهر</span><span class="stat-val" style="color:var(--orange)">${iqd(exp)}</span></div>
+          <div class="stat-box"><span class="stat-label">الصافي</span><span class="stat-val" style="color:#111827">${iqd(net)}</span></div>
+        </div>
+
+        <div class="list-container">
+          <div style="font-weight:900; margin-bottom:8px">أعلى 10 وكلاء مديونية (الرصيد الحالي)</div>
+          ${top.map((x,i)=>`<div class="list-item"><div>${i+1}. ${x.name}</div><div style="font-weight:900; color:var(--red)">${iqd(x.bal)}</div></div>`).join('')}
+        </div>
+
+        <div class="list-container" style="margin-top:10px">
+          <div style="font-weight:900; margin-bottom:8px">مصاريف حسب التصنيف (داخل الشهر)</div>
+          ${Object.keys(cats).length
+            ? Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="list-item"><div>${c}</div><div style="font-weight:900; color:var(--orange)">${iqd(v)}</div></div>`).join('')
+            : '<div style="text-align:center; padding:14px; color:gray">لا توجد مصاريف</div>'}
+        </div>
+      `;
+    };
+  }catch(e){ console.log(e); }
+})();
+
 </script>
 
 </body>
@@ -3604,4 +3993,5 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
 })();
 </script>
 <!-- ====================== END VIP PACK ====================== -->
+
 
