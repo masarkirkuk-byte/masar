@@ -1987,40 +1987,69 @@ function masarSendStatement(){
 
 
 <script>
-// === Force inject WhatsApp button next to كشف حساب ===
-(function(){
-  function injectBtn(){
-    if(!window.currentAgent && !document.querySelector('button')) return;
 
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const statementBtn = buttons.find(b => (b.textContent||'').includes('كشف'));
+
+
+<script>
+// === Robust Screen Reader WhatsApp ===
+(function(){
+
+function extractAgentName(){
+    // try common heading elements
+    const h = document.querySelector('h1, h2, .agent-name, .title');
+    if(h) return h.textContent.trim();
+    // fallback: first large text block
+    const text = document.body.innerText.split('\n').filter(t=>t.trim().length>3);
+    return text.length ? text[0].trim() : '';
+}
+
+function extractPhone(){
+    const bodyText = document.body.innerText;
+    const match = bodyText.match(/(07\d{9}|9647\d{8})/);
+    return match ? match[0] : '';
+}
+
+function extractBalance(){
+    const nums = Array.from(document.querySelectorAll('*'))
+        .map(el=>el.textContent.trim())
+        .filter(t=>/^\d{1,3}(,\d{3})*$/.test(t));
+    // biggest number usually balance
+    if(!nums.length) return '0';
+    nums.sort((a,b)=>{
+        const na=parseInt(a.replace(/,/g,''));
+        const nb=parseInt(b.replace(/,/g,''));
+        return nb-na;
+    });
+    return nums[0];
+}
+
+function injectButton(){
+    if(document.getElementById('masarFinalWABtn')) return;
+
+    const statementBtn = Array.from(document.querySelectorAll('button'))
+        .find(b=>b.textContent.includes('كشف'));
 
     if(!statementBtn) return;
-    if(document.getElementById('masarForceWABtn')) return;
 
-    const waBtn = document.createElement('button');
-    waBtn.id = 'masarForceWABtn';
-    waBtn.textContent = '📲 إرسال كشف حساب';
-    waBtn.className = statementBtn.className;
-    waBtn.style.background = '#16a34a';
-    waBtn.style.marginInlineStart = '6px';
+    const btn = document.createElement('button');
+    btn.id='masarFinalWABtn';
+    btn.textContent='📲 إرسال كشف حساب';
+    btn.className=statementBtn.className;
+    btn.style.background='#16a34a';
+    btn.style.marginInlineStart='6px';
 
-    waBtn.onclick = function(){
-        if(!window.currentAgent){ alert("اختر وكيل أولاً"); return; }
+    btn.onclick=function(){
 
-        let balance = 0;
-        try{ balance = calcAgentBalance(currentAgent); }catch(e){}
+        const name = extractAgentName();
+        const phoneRaw = extractPhone();
+        const balance = extractBalance();
 
-        let totalDebt = 0;
-        let totalPay = 0;
-
-        if(currentAgent.trans){
-            Object.values(currentAgent.trans).forEach(t=>{
-                const amt = parseFloat(t.amt||0);
-                if(t.type==='debt') totalDebt+=amt;
-                if(t.type==='pay') totalPay+=amt;
-            });
+        if(!phoneRaw){
+            alert("لم يتم العثور على رقم هاتف");
+            return;
         }
+
+        const phone = phoneRaw.replace(/^0/,'964').replace(/\D/g,'');
 
         const now = new Date().toLocaleString('en-GB');
 
@@ -2028,34 +2057,28 @@ function masarSendStatement(){
 `شبكة المسار لخدمات الإنترنت
 كركوك – مقابل نفق دوميز – جوار جامع الأحمدي
 
-الوكيل: ${currentAgent.name||''}
+الوكيل: ${name}
 
-إجمالي الديون: ${totalDebt.toLocaleString()} د.ع
-إجمالي التسديد: ${totalPay.toLocaleString()} د.ع
-الرصيد الحالي: ${balance.toLocaleString()} د.ع
+الرصيد الحالي: ${balance} د.ع
 
 وقت الإرسال: ${now}
 
 تم إرسال هذه الرسالة من نظام المسار نت`;
 
-        const phone = (currentAgent.phone||'').replace(/^0/,'964').replace(/\D/g,'');
-        if(!phone){ alert("رقم غير صالح"); return; }
-
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
     };
 
-    statementBtn.parentNode.insertBefore(waBtn, statementBtn.nextSibling);
-  }
+    statementBtn.parentNode.insertBefore(btn, statementBtn.nextSibling);
+}
 
-  if(document.readyState==='loading'){
-      document.addEventListener('DOMContentLoaded', function(){
-          setTimeout(injectBtn, 600);
-      });
-  }else{
-      setTimeout(injectBtn, 600);
-  }
+if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', ()=>setTimeout(injectButton,600));
+}else{
+    setTimeout(injectButton,600);
+}
 
-  setTimeout(injectBtn, 1500);
+setTimeout(injectButton,1500);
+
 })();
 </script>
 
