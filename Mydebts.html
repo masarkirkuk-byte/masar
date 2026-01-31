@@ -1691,88 +1691,138 @@
 
 
 
+
 <script>
-// ===== FINAL WhatsApp Message Builder FIXED =====
+// ===== FINAL WhatsApp Message Builder (API SEND + SAFE ENCODE) =====
 (function(){
 
-function addWAButton(){
-    if(document.getElementById('cleanWABtnFinal')) return;
+function buildStatementMessage(agent){
+    const name = agent && agent.name ? agent.name : '';
+    const phone = agent && agent.phone ? agent.phone : '';
+    let totalDebt = 0, totalPay = 0;
 
-    const statementBtn = Array.from(document.querySelectorAll('button'))
-        .find(b => b.textContent.includes('كشف'));
+    // Support multiple possible field names
+    const transObj = (agent && (agent.trans || agent.transactions || agent.moves)) ? (agent.trans || agent.transactions || agent.moves) : null;
 
-    if(!statementBtn) return;
+    if(transObj){
+        Object.values(transObj).forEach(t=>{
+            const type = (t.type || t.kind || '').toString().toLowerCase();
+            const amt = Number(t.amt ?? t.amount ?? t.value ?? 0) || 0;
+            if(type === 'debt' || type === 'دين') totalDebt += amt;
+            if(type === 'pay'  || type === 'تسديد') totalPay  += amt;
+        });
+    }
 
-    const btn = document.createElement('button');
-    btn.id = 'cleanWABtnFinal';
-    btn.textContent = '📲 إرسال كشف حساب';
-    btn.className = statementBtn.className;
-    btn.style.background = '#16a34a';
-    btn.style.marginInlineStart = '6px';
+    const balance = totalDebt - totalPay;
+    const now = new Date().toLocaleString('en-GB');
 
-    btn.onclick = function(){
-
-        if(typeof currentAgent === 'undefined' || !currentAgent){
-            alert("لم يتم العثور على بيانات الوكيل");
-            return;
-        }
-
-        const name = currentAgent.name || '';
-        let phone = currentAgent.phone || '';
-
-        if(!phone){
-            alert("رقم الهاتف غير موجود");
-            return;
-        }
-
-        phone = phone.replace(/^0/,'964').replace(/\D/g,'');
-
-        let balance = 0;
-        let totalDebt = 0;
-        let totalPay = 0;
-
-        if(currentAgent.trans){
-            Object.values(currentAgent.trans).forEach(t=>{
-                const amt = parseFloat(t.amt || 0);
-                if(t.type === 'debt') totalDebt += amt;
-                if(t.type === 'pay') totalPay += amt;
-            });
-            balance = totalDebt - totalPay;
-        }
-
-        const now = new Date().toLocaleString('en-GB');
-
-        const message =
+    // Arabic-only template (no emojis to avoid WhatsApp stripping on some clients)
+    const msg =
 `شبكة المسار لخدمات الإنترنت
 كركوك – مقابل نفق دوميز – جوار جامع الأحمدي
 
 اسم الوكيل: ${name}
+رقم الوكيل: ${phone}
 
-إجمالي الديون: ${totalDebt.toLocaleString()} د.ع
-إجمالي التسديد: ${totalPay.toLocaleString()} د.ع
+مجموع الديون: ${totalDebt.toLocaleString()} د.ع
+مجموع التسديد: ${totalPay.toLocaleString()} د.ع
 الرصيد الحالي: ${balance.toLocaleString()} د.ع
 
 وقت الإرسال: ${now}
 
 تم إنشاء هذه الرسالة تلقائياً من نظام المسار نت`;
 
-        const encoded = encodeURIComponent(message);
-        window.open("https://wa.me/" + phone + "?text=" + encoded, "_blank");
+    return msg;
+}
+
+function normalizePhone(raw){
+    let phone = (raw || '').toString().trim();
+    // remove spaces and non-digits
+    phone = phone.replace(/\D/g,'');
+    // if starts with 0 (Iraq local), convert to 964
+    if(phone.startsWith('0')) phone = '964' + phone.slice(1);
+    // if user entered +964, remove +
+    if(phone.startsWith('9640')) phone = '964' + phone.slice(4);
+    return phone;
+}
+
+function openWhatsApp(phone, message){
+    const text = encodeURIComponent(message || '');
+    // Use api.whatsapp.com which is more tolerant across desktop/mobile
+    const url = "https://api.whatsapp.com/send?phone=" + phone + "&text=" + text;
+    window.open(url, "_blank");
+}
+
+function copyToClipboard(text){
+    try{
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly','');
+        ta.style.position='fixed';
+        ta.style.opacity='0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return true;
+    }catch(e){
+        return false;
+    }
+}
+
+function addWAButton(){
+    if(document.getElementById('masarWABtnFinal2')) return;
+
+    const statementBtn = Array.from(document.querySelectorAll('button'))
+        .find(b => (b.textContent || '').includes('كشف'));
+
+    if(!statementBtn) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'masarWABtnFinal2';
+    btn.textContent = 'إرسال واتساب';
+    btn.className = statementBtn.className;
+    btn.style.background = '#16a34a';
+    btn.style.marginInlineStart = '6px';
+
+    btn.onclick = function(){
+        if(typeof currentAgent === 'undefined' || !currentAgent){
+            alert("لم يتم العثور على بيانات الوكيل");
+            return;
+        }
+        const phone = normalizePhone(currentAgent.phone);
+        if(!phone){
+            alert("رقم الهاتف غير صالح");
+            return;
+        }
+        const message = buildStatementMessage(currentAgent);
+
+        // Always copy so user can paste even if WhatsApp client ignores text
+        const copied = copyToClipboard(message);
+
+        openWhatsApp(phone, message);
+
+        if(copied){
+            // small non-blocking hint
+            setTimeout(()=> {
+                try{ console.log("تم نسخ نص الرسالة للحافظة"); }catch(e){}
+            }, 50);
+        }
     };
 
     statementBtn.parentNode.insertBefore(btn, statementBtn.nextSibling);
 }
 
 if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', ()=>setTimeout(addWAButton,700));
+    document.addEventListener('DOMContentLoaded', ()=>setTimeout(addWAButton,800));
 }else{
-    setTimeout(addWAButton,700);
+    setTimeout(addWAButton,800);
 }
-
-setTimeout(addWAButton,1500);
+setTimeout(addWAButton,1600);
 
 })();
 </script>
+
 
 </body>
 </html>
