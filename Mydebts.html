@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام المسار نت)</title>
+    <title>المسار نت - </title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js">
@@ -967,14 +967,13 @@
                 <label class="form-label">التاريخ</label><input type="datetime-local" id="inExDate" class="app-input">
                 <label class="form-label">نوع الصرف</label><input id="inExType" class="app-input" placeholder="مثال: رواتب / ايجارات / يومي">
                 <label class="form-label">تصنيف</label>
+
 <select id="inExCat" class="app-input">
+  <option value="مصروف يومي">مصروف يومي</option>
   <option value="رواتب">رواتب</option>
-  <option value="إيجار">إيجار</option>
-  <option value="صيانة">صيانة</option>
-  <option value="وقود">وقود</option>
-  <option value="إنترنت">إنترنت</option>
-  <option value="أخرى">أخرى</option>
+  <option value="إيجارات">إيجارات</option>
 </select>
+
 <label class="form-label">المبلغ</label><input id="inExAmt" class="app-input" onkeyup="fmtInput(this)">
                 <label class="form-label">ملاحظات</label><input id="inExNote" class="app-input">
                 <button class="btn-main" style="background:var(--orange)" onclick="saveExp()">حفظ</button>
@@ -4245,6 +4244,5 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
 })();
 </script>
 <!-- ====================== END VIP PACK ====================== -->
-
 
 
