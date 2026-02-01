@@ -571,16 +571,12 @@
         <div style="text-align:center; font-size:1.8rem; font-weight:bold; color:var(--primary); margin-bottom:15px" id="detailBal">0</div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px">
-            <button class="btn-main btn-danger" onclick="openTransModal('debt')">➕ دين</button>
-            <button class="btn-main btn-primary" style="background:var(--green)" onclick="openTransModal('pay')">💰 تسديد</button>
+            <button class="btn-main btn-danger" onclick="openTransModal('debt')">➕ إضافة دين</button>
+            <button class="btn-main btn-primary" style="background:var(--green)" onclick="openTransModal('pay')">💰 تسديد دين</button>
         </div>
 
         <button class="btn-main" style="background:#25D366; margin-bottom:10px" onclick="waLink()">📱 واتساب</button>
         <button class="btn-main" style="background:#333; margin-bottom:10px" onclick="printStatement()">📄 كشف حساب</button>
-
-        <button class="btn-main" style="background:#0f172a; margin-bottom:10px" onclick="printLastReceipt()">🧾 وصل آخر حركة</button>
-
-
         <!-- حذف وكيل (للأدمن فقط + شرط الرصيد = 0) -->
         <button id="btnDeleteAgent" class="btn-main" style="background:#111827; display:none" onclick="deleteAgentIfZero()">🗑️ حذف الوكيل (إذا الرصيد صفر)</button>
 
@@ -688,7 +684,7 @@
 
     <div id="statement-layout">
         <div class="stmt-header">
-            <div class="stmt-company-name">شركة المسار نت</div>
+            <div class="stmt-company-name">شبكة المسار للتجارة العامة وخدمات الاتصالات والانترنت</div>
             <div class="stmt-company-sub">كركوك - مقابل نفق دوميز - جوار جامع الأحمدي</div>
             <div class="stmt-doc-title"><span>كشف حساب وكيل</span></div>
         </div>
@@ -707,10 +703,16 @@
             <div class="stmt-sum-box" style="border-color:green"><div>التسديدات</div><div id="stmt-total-paid"></div></div>
             <div class="stmt-sum-box" style="background:#e0f2fe; border-color:#2563eb"><div>الرصيد النهائي</div><div id="stmt-balance"></div></div>
         </div>
-    
+        <div style="margin-top:14px; padding:10px; border:1px dashed #94a3b8; border-radius:10px; text-align:center; font-weight:900">
+            <div>الحسابات</div>
+            <div style="direction:ltr; font-size:1.1rem">07706615483</div>
+        </div>
+
+    </div>
+
     <div id="receipt-layout">
         <div class="stmt-header">
-            <div class="stmt-company-name">شركة المسار نت</div>
+            <div class="stmt-company-name">شبكة المسار للتجارة العامة وخدمات الاتصالات والانترنت</div>
             <div class="stmt-company-sub">كركوك - مقابل نفق دوميز - جوار جامع الأحمدي</div>
             <div class="stmt-doc-title"><span>وصل حركة</span></div>
         </div>
@@ -738,6 +740,11 @@
             <div>توقيع الوكيل: ____________</div>
             <div>توقيع الشركة: ____________</div>
         </div>
+        <div style="margin-top:14px; padding:10px; border:1px dashed #94a3b8; border-radius:10px; text-align:center; font-weight:900">
+            <div>الحسابات</div>
+            <div style="direction:ltr; font-size:1.1rem">07706615483</div>
+        </div>
+
     </div>
 
 
@@ -758,6 +765,19 @@
     .stmt-table { width:100%; border-collapse:collapse; margin-top:6px }
     .stmt-table th { background:#111827; color:#fff; padding:8px; font-size:0.95rem }
     .stmt-table td { border:1px solid #e5e7eb; padding:7px; font-size:0.92rem }
+
+/* تحسين وضوح التاريخ داخل كشف الحساب */
+.stmt-table td:first-child, .stmt-table th:first-child{
+  direction:ltr;
+  unicode-bidi:embed;
+  text-align:center;
+  font-weight:800;
+}
+.stmt-table td{
+  color:#111827;
+  font-size:14px;
+}
+
     .stmt-summary { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:12px }
     .stmt-sum-box { border:2px solid #e5e7eb; border-radius:12px; padding:10px; text-align:center; font-weight:800 }
 .stmt-doc-title { font-size: 1.2rem; margin-top: 5px; background: #eee; display: inline-block; padding: 5px 20px; border-radius: 5px; }
@@ -1184,12 +1204,9 @@
 
 
 <select id="inExCat" class="app-input">
-  <option value="يومي">يومي</option>
-  <option value="اسبوعي">اسبوعي</option>
-  <option value="شهري">شهري</option>
-  <option value="سنوي">سنوي</option>
+  <option value="مصروف يومي">مصروف يومي</option>
   <option value="رواتب">رواتب</option>
-  <option value="إيجارات">إيجارات</option>
+  <option value="ايجارات">ايجارات</option>
 </select>
 
 
@@ -1469,7 +1486,7 @@
             t.innerHTML += `<tr><td>${i+1}</td><td>${a.name||''}</td><td>${a.phone||''}</td><td>${a.address||''}</td><td>${fmt(bal)}</td></tr>`;
         });
 
-        document.getElementById('agents-print-date').innerText = new Date().toLocaleDateString('ar-EG');
+        document.getElementById('agents-print-date').innerText = new Date().toLocaleDateString('en-GB');
         printElem('agents-list-layout', 'قائمة_الوكلاء');
     }
 
@@ -1486,7 +1503,7 @@
             t.innerHTML += `<tr><td>${i+1}</td><td>${e.type||''}</td><td>${fmt(e.amount)}</td><td>${new Date(e.date).toLocaleDateString()}</td><td>${e.note||''}</td></tr>`;
         });
 
-        document.getElementById('exp-print-date').innerText = new Date().toLocaleDateString('ar-EG');
+        document.getElementById('exp-print-date').innerText = new Date().toLocaleDateString('en-GB');
         document.getElementById('exp-print-total').innerText = fmt(sum);
         printElem('expenses-list-layout', 'المصاريف');
     }
@@ -1497,7 +1514,7 @@
         
         document.getElementById('stmt-phone').innerText = (a.phone||'');
         document.getElementById('stmt-address').innerText = (a.address||'');
-document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('ar-EG');
+document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('en-GB');
 
         const t = document.getElementById('stmt-body'); t.innerHTML = '';
         let d=0, p=0;
@@ -1507,7 +1524,7 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
                 const isD = x.type==='debt';
                 if(isD) d+=parseFloat(x.amt); else p+=parseFloat(x.amt);
                 t.innerHTML += `<tr>
-                    <td>${new Date(x.date).toLocaleDateString()}</td>
+                    <td>${new Date(x.date).toLocaleDateString('en-GB')}</td>
                     <td>${isD?'دين':'تسديد'}</td>
                     <td>${x.note||''}${x.voucherNo?(' | '+x.voucherNo):''}</td>
                     <td>${isD?fmt(x.amt):'-'}</td>
@@ -1596,7 +1613,7 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
                 <div><b>${x.name}</b> <small>(${x.type})</small></div>
                 <div style="text-align:left">
                     <b style="color:${color}">${fmt(x.amt)}</b><br>
-                    <small>${new Date(x.date).toLocaleDateString()}</small>
+                    <small>${new Date(x.date).toLocaleDateString('en-GB')}</small>
                 </div>
             </div>`;
         });
@@ -1734,43 +1751,84 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
     };
 
 
-window.waLink = async () => {
+window.waLink = () => {
         const a = (typeof agents !== 'undefined' && Array.isArray(agents) ? agents : (window.agents||[])).find(x => x.id == curAgentId);
         if(!a || !a.phone) return alert('رقم الواتساب غير موجود');
 
-        // Prepare a short message
-        const bal = calcAgentBalance(a);
-        const msg = `كشف حساب - شركة المسار نت
-`+
-                    `الوكيل: ${a.name}
-`+
-                    `الهاتف: ${a.phone||''}
-`+
-                    `العنوان: ${a.address||''}
-`+
-                    `الرصيد الحالي: ${fmt(bal)}
-`+
-                    `ملاحظة: إذا ظهر الملف، أرفقه هنا.`; 
+        // === Compute totals + last transaction info ===
+        let totalDebt = 0;
+        let totalPaid = 0;
 
-        // Try to generate PDF and share as a file (works on many Android phones)
+        let lastVoucher = "-";
+        let lastDate = "-";
+        let lastTypeTxt = "-";
+        let lastTypeIcon = "";
+        let lastAmount = 0;
+
         try{
-            // fill statement fields first
-            try{ printStatement(); }catch(e){}
-            // generate blob without forcing download
-            const blob = await pdfBlobFromElem('statement-layout', `كشف_حساب_${a.name}`);
-            const file = new File([blob], `كشف_حساب_${a.name}.pdf`, {type:'application/pdf'});
+            const transArr = a.trans ? Object.values(a.trans) : [];
+            if(transArr.length){
+                transArr.forEach(t=>{
+                    const amt = safeNum(t.amt);
+                    if(t.type === 'debt') totalDebt += amt;
+                    else totalPaid += amt;
+                });
 
-            if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
-                await navigator.share({ files:[file], text: msg });
-                return;
+                // Last movement
+                transArr.sort((x,y)=> new Date(y.date) - new Date(x.date));
+                const last = transArr[0];
+                if(last){
+                    lastVoucher = last.voucherNo || "-";
+                    lastDate = last.date ? new Date(last.date).toLocaleDateString('en-GB') : "-";
+                    const isDebt = (last.type === 'debt');
+                    lastTypeIcon = isDebt ? "📉" : "💵";
+                    lastTypeTxt  = isDebt ? "دين" : "تسديد";
+                    lastAmount   = safeNum(last.amt);
+                }
             }
-        }catch(err){
-            console.log(err);
+        }catch(e){ console.log(e); }
+
+        const remainingDebt = totalDebt - totalPaid;
+
+        // الدين المتبقي الذكي
+        let remainingText = "";
+        if(remainingDebt > 0){
+            remainingText = iqd(remainingDebt) + " د.ع";
+        } else if(remainingDebt === 0){
+            remainingText = "لا يوجد دين حاليًا";
+        } else {
+            remainingText = "رصيد دائن لصالح الوكيل " + iqd(Math.abs(remainingDebt)) + " د.ع";
         }
 
-        // Fallback: open WhatsApp with text only (user can attach downloaded PDF)
+        const today = new Date().toLocaleDateString('en-GB');
+
+        // === WhatsApp message (official) ===
+        const msg =
+`📄 كشف حساب رسمي
+شركة شبكة المسار لخدمات الإنترنت
+----------------------------------------
+👤 اسم الوكيل: ${a.name || '-'}
+📍 العنوان: ${a.address || '-'}
+📱 رقم الهاتف: ${a.phone || '-'}
+----------------------------------------
+💰 مجموع الديون: ${iqd(totalDebt)} د.ع
+💵 مجموع التسديد: ${iqd(totalPaid)} د.ع
+📊 الدين المتبقي: ${remainingText}
+----------------------------------------
+🧾 آخر حركة:
+${lastTypeIcon} النوع: ${lastTypeTxt}
+💲 المبلغ: ${iqd(lastAmount)} د.ع
+🧾 رقم الوصل: ${lastVoucher}
+📅 تاريخ الحركة: ${lastDate}
+----------------------------------------
+📅 تاريخ الإصدار: ${today}
+قسم الحسابات – شبكة المسار`;
+
+        // فتح واتساب مباشرة (بدون await) حتى ما ينحجب window.open
         openWhatsApp(a.phone, msg);
-    }// Clock
+    };
+
+    // Clock
     setInterval(() => {
         const d = new Date();
         document.getElementById('clock').innerText = d.toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit'});
@@ -2015,141 +2073,9 @@ window.waLink = async () => {
 
 
 
-<script>
-// ===== WhatsApp Desktop FIX (copy + open) =====
-(function(){
 
-function copyText(text){
-  try{
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      return navigator.clipboard.writeText(text);
-    }
-  }catch(e){}
-  return new Promise((resolve,reject)=>{
-    try{
-      const ta=document.createElement('textarea');
-      ta.value=text;
-      ta.style.position='fixed';
-      ta.style.top='-1000px';
-      document.body.appendChild(ta);
-      ta.focus(); ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      resolve();
-    }catch(err){ reject(err); }
-  });
-}
+<!-- WhatsApp Desktop FIX removed as requested -->
 
-function buildMsg(agent){
-  const name = agent.name || '';
-  const phoneRaw = agent.phone || '';
-  let totalDebt=0, totalPay=0;
-
-  if(agent.trans){
-    Object.values(agent.trans).forEach(t=>{
-      const amt = parseFloat(t.amt ?? t.amount ?? 0) || 0;
-      const type = (t.type||'').toLowerCase();
-      if(type==='debt') totalDebt += amt;
-      if(type==='pay') totalPay += amt;
-    });
-  }
-
-  const balance = totalDebt - totalPay;
-  const now = new Date().toLocaleString('en-GB');
-
-  return (
-`شبكة المسار لخدمات الإنترنت
-كركوك – مقابل نفق دوميز – جوار جامع الأحمدي
-
-اسم الوكيل: ${name}
-
-إجمالي الديون: ${totalDebt.toLocaleString()} د.ع
-إجمالي التسديد: ${totalPay.toLocaleString()} د.ع
-الرصيد الحالي: ${balance.toLocaleString()} د.ع
-
-وقت الإرسال: ${now}
-
-تم إنشاء هذه الرسالة تلقائياً من نظام المسار نت`
-  );
-}
-
-function normPhone(p){
-  p = String(p||'').trim();
-  p = p.replace(/\s+/g,'').replace(/^\+/, '').replace(/^00/, '');
-  // Iraq common formats
-  if(/^0\d+/.test(p)) p = '964' + p.substring(1);
-  if(/^7\d{8,}$/.test(p)) p = '964' + p;
-  p = p.replace(/\D/g,'');
-  return p;
-}
-
-function openDesktopWA(phone, text){
-  const p = normPhone(phone);
-  if(!p){ alert('رقم الهاتف غير صالح'); return; }
-
-  // 1) Try whatsapp:// (Desktop app handler)
-  const url1 = `whatsapp://send?phone=${p}&text=${encodeURIComponent(text)}`;
-  // 2) Fallback to web handler
-  const url2 = `https://api.whatsapp.com/send?phone=${p}&text=${encodeURIComponent(text)}`;
-  // 3) Minimal open chat (if text ignored) - still okay because we copied it
-  const url3 = `https://api.whatsapp.com/send?phone=${p}`;
-
-  try{
-    window.location.href = url1;
-    setTimeout(()=>{ window.open(url2, '_blank'); }, 600);
-    setTimeout(()=>{ window.open(url3, '_blank'); }, 1200);
-  }catch(e){
-    window.open(url2, '_blank');
-  }
-}
-
-function addWAButton(){
-  if(document.getElementById('cleanWABtnDesktopFix')) return;
-
-  const statementBtn = Array.from(document.querySelectorAll('button'))
-    .find(b => (b.textContent||'').includes('كشف'));
-
-  if(!statementBtn) return;
-
-  const btn = document.createElement('button');
-  btn.id = 'cleanWABtnDesktopFix';
-  btn.textContent = '📲 إرسال كشف حساب';
-  btn.className = statementBtn.className;
-  btn.style.background = '#16a34a';
-  btn.style.marginInlineStart = '6px';
-
-  btn.onclick = async function(){
-    try{
-      if(typeof currentAgent === 'undefined' || !currentAgent){
-        alert('افتح صفحة وكيل أولاً');
-        return;
-      }
-      const msg = buildMsg(currentAgent);
-      await copyText(msg);
-      // Inform user to paste if WA opens without text
-      try{ 
-        if(typeof toast === 'function') toast('تم نسخ الرسالة — إذا فتح واتساب بدون نص اضغط Ctrl+V');
-      }catch(e){}
-      alert('تم نسخ الرسالة. إذا فتح واتساب بدون نص: اضغط Ctrl+V للصق الرسالة.');
-      openDesktopWA(currentAgent.phone || '', msg);
-    }catch(e){
-      console.log(e);
-      alert('صار خطأ أثناء تجهيز رسالة الواتساب');
-    }
-  };
-
-  statementBtn.parentNode.insertBefore(btn, statementBtn.nextSibling);
-}
-
-if(document.readyState==='loading'){
-  document.addEventListener('DOMContentLoaded', ()=>setTimeout(addWAButton, 700));
-}else{
-  setTimeout(addWAButton, 700);
-}
-setTimeout(addWAButton, 1600);
-
-})();
-</script>
 
 
 <div style="text-align:center;margin-top:40px;padding:15px;
@@ -2211,6 +2137,28 @@ window.downloadExpensesExcel = function () {
 <script>
 
 </script>
+
+
+<!-- MASAR_TABLE_FIX_V18: improve statement table cell visibility (no deletions) -->
+<style>
+/* كشف الحساب: تحسين وضوح خانات الجدول */
+#statement-layout .stmt-table th,
+#statement-layout .stmt-table thead th {
+  background:#111827 !important;
+  color:#ffffff !important;
+  font-weight:900 !important;
+}
+
+#statement-layout .stmt-table td {
+  background:#f4f7fb !important; /* رمادي-أزرق فاتح */
+  color:#111827 !important;
+  font-weight:700 !important;
+}
+
+#statement-layout .stmt-table tbody tr:nth-child(even) td {
+  background:#eef2ff !important; /* تمييز سطر */
+}
+</style>
 
 </body>
 </html>
@@ -2504,7 +2452,7 @@ function addPDFButtons(){
           </table>`;
         pc.appendChild(wrap);
       }
-      document.getElementById('logs-print-date').innerText = new Date().toLocaleDateString('ar-EG');
+      document.getElementById('logs-print-date').innerText = new Date().toLocaleDateString('en-GB');
       const body = document.getElementById('logs-print-body');
       body.innerHTML = "";
       // reuse current filtered view (up to 300)
@@ -2554,7 +2502,7 @@ function addPDFButtons(){
           <div id="report-print-content"></div>`;
         pc.appendChild(wrap);
       }
-      document.getElementById('report-print-date').innerText = new Date().toLocaleDateString('ar-EG');
+      document.getElementById('report-print-date').innerText = new Date().toLocaleDateString('en-GB');
       const c = document.getElementById('report-print-content');
       // clone current report result and totals
       const repRes = document.getElementById('repResult');
@@ -4176,7 +4124,7 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
       if(!t) return;
 
       document.getElementById('invoice-layout').style.display = 'block';
-      document.getElementById('inv-date').innerText = new Date().toLocaleDateString('ar-EG');
+      document.getElementById('inv-date').innerText = new Date().toLocaleDateString('en-GB');
       document.getElementById('inv-id').innerText = t.ref || nextReceipt(ttype==='debt'?'DEB':'PAY');
       document.getElementById('inv-client').innerText = a.name;
       document.getElementById('inv-type-title').innerText = (ttype==='debt'?'دين':'تسديد');
