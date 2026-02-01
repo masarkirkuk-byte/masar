@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>المسار نت </title>
+    <title>نظام المسار نت - V62 (Dashboard + Reports PDF + Agents Backup + PWA)</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
 /* === VIP ADDONS (Stage 3) - safe wrapper === */
 (function(){
   try{
@@ -201,7 +204,6 @@
     };
   }catch(e){ console.log(e); }
 })();
-
 </script>
 
     <!-- Firebase -->
@@ -286,6 +288,8 @@
         .total-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
         .big-card { padding: 15px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
 
+        .big-card.wide { grid-column: 1 / -1; }
+
         /* القوائم والعناصر */
         .list-container { background: white; border-radius: 12px; padding: 10px; margin-top: 15px; }
         .list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background 0.2s; }
@@ -342,14 +346,41 @@
 #clock{font-size:1.4rem !important; font-weight:900 !important;}
 #dateDisplay{font-size:1.05rem !important; font-weight:800 !important;}
 
-</style>
 
+/* === Expenses compact controls === */
+#expensesView .controls-row{display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap}
+#expensesView .controls-row .btn-main{flex:1; min-width:180px}
+#expensesView .controls-row .mini-btn{border:none; padding:8px 12px; border-radius:10px; font-weight:900; cursor:pointer}
+#expensesView .filters-row{display:flex; gap:6px; margin:0 0 10px 0; flex-wrap:wrap}
+#expensesView .filters-row .filter-btn{padding:7px 12px; font-weight:800}
+
+
+/* === Main menu compact spacing (reports/logs back down) === */
+.main-menu{gap:10px !important; margin-top:10px !important}
+.menu-btn{margin:0 !important}
+
+
+/* === Agents card text visibility fix === */
+.list-item{gap:10px !important}
+.item-details{flex:1 !important; min-width:0 !important}
+.item-details small{display:block !important; opacity:1 !important}
+
+</style>
 <style>
 #liveTime {
     display: inline-block;
     padding-bottom: 6px;
     border-bottom: 1px solid black;
 }
+</style>
+
+
+<style>
+/* === Agents list: ensure details visible and not collapsed === */
+#agentsListUI .list-item{min-height:72px; align-items:center;}
+#agentsListUI .item-details h4{margin:0 0 4px 0; line-height:1.3}
+#agentsListUI .item-details small{display:block; margin-bottom:4px; line-height:1.2}
+#agentsListUI .item-details p{margin:0; line-height:1.2; white-space:normal}
 </style>
 
 </head>
@@ -395,15 +426,16 @@
             <!-- الصف الاول -->
             <button class="menu-btn" style="background:var(--purple)" onclick="nav('agents')">👥 الوكلاء</button>
             <button class="menu-btn" style="background:var(--orange)" onclick="nav('expenses')">💸 المصاريف</button>
+<!-- الصف الثالث -->
+            <button class="menu-btn" style="background:#111827" onclick="openVipModal()">📊 تقرير شهري</button>
+            <button class="menu-btn" style="background:#ef4444" onclick="openLateModal()">🚨 المتأخرين</button>
+
 
             <!-- الصف الثاني -->
             <button class="menu-btn" style="background:var(--dark)" onclick="nav('reports')">📄 التقارير</button>
             <button class="menu-btn" style="background:#475569" onclick="nav('logs')">📋 سجل النشاطات</button>
 
-            <!-- الصف الثالث -->
-            <button class="menu-btn" style="background:#111827" onclick="openVipModal()">📊 تقرير شهري</button>
-            <button class="menu-btn" style="background:#ef4444" onclick="openLateModal()">🚨 المتأخرين</button>
-
+            
             <!-- اخر شي -->
             <button class="menu-btn wide-btn" style="background:var(--teal)" id="btnUsers" onclick="nav('users')">🔐 إدارة الحسابات</button>
 
@@ -441,6 +473,14 @@
             </div>
         </div>
 
+
+        <div class="total-summary" style="margin-top:10px">
+            <div class="big-card wide" style="background: linear-gradient(135deg, #1d4ed8, #0f172a);">
+                <div style="font-size:0.8rem">الصافي (الواصل - المصاريف)</div>
+                <div style="font-size:1.4rem; font-weight:bold; direction:ltr" id="totalNet">0</div>
+            </div>
+        </div>
+
         <div style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:10px">
             <button onclick="backup()" style="background:#475569; color:white; border:none; padding:12px; border-radius:10px; font-weight:bold; cursor:pointer">💾 حفظ نسخة (وكلاء فقط)</button>
             <button onclick="document.getElementById('restoreFile').click()" style="background:#0f172a; color:white; border:none; padding:12px; border-radius:10px; font-weight:bold; cursor:pointer">📤 استرجاع بيانات (وكلاء فقط)</button>
@@ -458,6 +498,7 @@
         <div class="advanced-filter" style="display:flex; gap:10px">
              <button class="btn-main btn-primary" style="padding:10px; font-size:0.9rem" onclick="openModal('agent')">+ وكيل جديد</button>
              <button onclick="downloadAgentsList()" style="border:none; background:#333; color:white; padding:10px; border-radius:8px; cursor:pointer">📄 تحميل PDF</button>
+             <button type="button" onclick="downloadAgentsExcel()" style="border:none; background:#1d4ed8; color:white; padding:10px; border-radius:8px; cursor:pointer">📊 تحميل Excel</button>
         </div>
 
         <input type="text" id="agSearch" class="app-input" placeholder="ابحث باسم الوكيل..." oninput="renderAgentsList()">
@@ -471,7 +512,31 @@
             <span>المصاريف</span>
         </div>
 
-        <button class="btn-main" style="background:var(--orange); margin-bottom:15px" onclick="openModal('expense')">+ مصروف جديد</button>
+        
+        
+
+        
+        
+        <div class="controls-row">
+            <button class="btn-main" style="background:var(--orange)" onclick="openModal('expense')">+ مصروف جديد</button>
+            <button type="button" class="mini-btn" onclick="downloadExpensesExcel()" style="background:#1d4ed8; color:white">📊 Excel</button>
+            <button class="mini-btn" onclick="printExpList()" style="background:#111827; color:white">📄 PDF</button>
+        </div>
+    
+
+        <div class="filters-row">
+            <button class="filter-btn active" onclick="setExpFilter('all', this)">الكل</button>
+            <button class="filter-btn" onclick="setExpFilter('يومي', this)">مصروف يومي</button>
+            <button class="filter-btn" onclick="setExpFilter('رواتب', this)">رواتب</button>
+            <button class="filter-btn" onclick="setExpFilter('إيجارات', this)">إيجارات</button>
+            <button class="filter-btn" onclick="setExpFilter('أخرى', this)">أخرى</button>
+        </div>
+
+
+
+
+        
+
 
         <div class="advanced-filter">
             <div class="filter-row">
@@ -483,10 +548,15 @@
             </div>
         </div>
 
-        <div style="background:#fff7ed; color:#c2410c; padding:15px; text-align:center; font-weight:bold; border-radius:10px; margin-bottom:10px; font-size:1.1rem; display:flex; justify-content:space-between; align-items:center">
-            <span>المجموع: <span id="expTotal">0</span></span>
-            <button onclick="printExpList()" style="border:none; background:#c2410c; color:white; padding:5px 10px; border-radius:5px; font-size:0.8rem">PDF</button>
+        
+        <div style="background:#fff7ed; color:#c2410c; padding:15px; text-align:center; font-weight:900; border-radius:10px; margin-bottom:10px; font-size:1.15rem">
+            المجموع: <span id="expTotal">0</span>
         </div>
+
+        <div style="background:#eef2ff; color:#1e3a8a; padding:12px; text-align:center; font-weight:900; border-radius:10px; margin-bottom:10px; font-size:1.05rem">
+            مجموع السنة: <span id="expYearTotal">0</span>
+        </div>
+
 
         <div class="list-container" id="expensesListUI"></div>
     </div>
@@ -507,6 +577,9 @@
 
         <button class="btn-main" style="background:#25D366; margin-bottom:10px" onclick="waLink()">📱 واتساب</button>
         <button class="btn-main" style="background:#333; margin-bottom:10px" onclick="printStatement()">📄 كشف حساب</button>
+
+        <button class="btn-main" style="background:#0f172a; margin-bottom:10px" onclick="printLastReceipt()">🧾 وصل آخر حركة</button>
+
 
         <!-- حذف وكيل (للأدمن فقط + شرط الرصيد = 0) -->
         <button id="btnDeleteAgent" class="btn-main" style="background:#111827; display:none" onclick="deleteAgentIfZero()">🗑️ حذف الوكيل (إذا الرصيد صفر)</button>
@@ -539,11 +612,7 @@
             <span>التقارير</span>
         </div>
 
-        <div style="display:flex; gap:5px; margin-bottom:10px">
-            <button class="filter-btn active" onclick="setReportFilter('all', this)">الكل</button>
-            <button class="filter-btn" onclick="setReportFilter('agents', this)">وكلاء</button>
-            <button class="filter-btn" onclick="setReportFilter('expenses', this)">مصاريف</button>
-        </div>
+        
 
         <div class="advanced-filter">
             <div class="date-input-group" style="margin-bottom:10px">
@@ -619,12 +688,15 @@
 
     <div id="statement-layout">
         <div class="stmt-header">
-            <div class="stmt-company-name">المسار نت</div>
-            <div class="stmt-doc-title"><span>كشف حساب</span></div>
+            <div class="stmt-company-name">شركة المسار نت</div>
+            <div class="stmt-company-sub">كركوك - مقابل نفق دوميز - جوار جامع الأحمدي</div>
+            <div class="stmt-doc-title"><span>كشف حساب وكيل</span></div>
         </div>
         <div class="stmt-info-box">
-            <div><strong>حضرة الوكيل:</strong> <span id="stmt-client"></span></div>
-            <div><strong>تاريخ:</strong> <span id="stmt-date"></span></div>
+            <div><strong>اسم الوكيل:</strong> <span id="stmt-client"></span></div>
+            <div><strong>رقم الوكيل:</strong> <span id="stmt-phone"></span></div>
+            <div><strong>عنوان الوكيل:</strong> <span id="stmt-address"></span></div>
+            <div><strong>تاريخ الإصدار:</strong> <span id="stmt-date"></span></div>
         </div>
         <table class="stmt-table">
             <thead><tr><th>التاريخ</th><th>الحركة</th><th>التفاصيل</th><th>مدين</th><th>دائن</th></tr></thead>
@@ -635,13 +707,60 @@
             <div class="stmt-sum-box" style="border-color:green"><div>التسديدات</div><div id="stmt-total-paid"></div></div>
             <div class="stmt-sum-box" style="background:#e0f2fe; border-color:#2563eb"><div>الرصيد النهائي</div><div id="stmt-balance"></div></div>
         </div>
+    
+    <div id="receipt-layout">
+        <div class="stmt-header">
+            <div class="stmt-company-name">شركة المسار نت</div>
+            <div class="stmt-company-sub">كركوك - مقابل نفق دوميز - جوار جامع الأحمدي</div>
+            <div class="stmt-doc-title"><span>وصل حركة</span></div>
+        </div>
+
+        <div class="stmt-info-box">
+            <div><strong>اسم الوكيل:</strong> <span id="rcp-client"></span></div>
+            <div><strong>رقم الوكيل:</strong> <span id="rcp-phone"></span></div>
+            <div><strong>عنوان الوكيل:</strong> <span id="rcp-address"></span></div>
+            <div><strong>تاريخ الحركة:</strong> <span id="rcp-date"></span></div>
+            <div><strong>رقم الوصل:</strong> <span id="rcp-voucher"></span></div>
+        </div>
+
+        <table class="stmt-table">
+            <thead><tr><th>النوع</th><th>المبلغ</th><th>الملاحظات</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td id="rcp-type"></td>
+                    <td id="rcp-amt"></td>
+                    <td id="rcp-note"></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div style="margin-top:14px; display:flex; justify-content:space-between; font-weight:800">
+            <div>توقيع الوكيل: ____________</div>
+            <div>توقيع الشركة: ____________</div>
+        </div>
     </div>
+
+
+        <div class="list-container" style="margin-top:10px">
+            <div style="font-weight:900; margin-bottom:8px">📈 حركة آخر 6 أشهر (ديون/تسديد/مصاريف)</div>
+            <canvas id="dashChart" height="160"></canvas>
+        </div>
+
+</div>
 </div>
 
 <style>
     .stmt-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
     .stmt-company-name { font-size: 1.5rem; font-weight: 800; color: #000; }
-    .stmt-doc-title { font-size: 1.2rem; margin-top: 5px; background: #eee; display: inline-block; padding: 5px 20px; border-radius: 5px; }
+    
+    .stmt-company-sub { font-size: 0.95rem; font-weight: 700; color:#111827; margin-top:4px }
+    .stmt-info-box { display:grid; grid-template-columns: 1fr 1fr; gap:8px 16px; border:1px solid #e5e7eb; padding:10px 12px; border-radius:10px; background:#f8fafc; margin-bottom:12px }
+    .stmt-table { width:100%; border-collapse:collapse; margin-top:6px }
+    .stmt-table th { background:#111827; color:#fff; padding:8px; font-size:0.95rem }
+    .stmt-table td { border:1px solid #e5e7eb; padding:7px; font-size:0.92rem }
+    .stmt-summary { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:12px }
+    .stmt-sum-box { border:2px solid #e5e7eb; border-radius:12px; padding:10px; text-align:center; font-weight:800 }
+.stmt-doc-title { font-size: 1.2rem; margin-top: 5px; background: #eee; display: inline-block; padding: 5px 20px; border-radius: 5px; }
     .stmt-info-box { display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 1rem; border: 1px solid #ccc; padding: 10px; }
     .stmt-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.9rem; }
     .stmt-table th, .stmt-table td { border: 1px solid #000; padding: 8px; text-align: center; }
@@ -672,6 +791,11 @@
     let curAgentId = null;
     let editId = null;
     let editingUser = null;
+
+    let dashChart = null;
+
+    // ===== VIP PRO: Alert limit for agent debt (IQD) =====
+    const DEBT_ALERT_LIMIT = parseFloat(localStorage.getItem('masar_debt_limit')||'5000000');
 
     // --- PWA Service Worker (تثبيت كتطبيق) ---
     if ('serviceWorker' in navigator) {
@@ -767,7 +891,7 @@
         const startMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
         const startWeek = new Date(now.setDate(now.getDate() - now.getDay())).setHours(0,0,0,0);
 
-        let s = {dd:0, dw:0, dm:0, pd:0, pw:0, pm:0, ed:0, ew:0, em:0}, tDebt=0, tPaid=0;
+        let s = {dd:0, dw:0, dm:0, pd:0, pw:0, pm:0, ed:0, ew:0, em:0}, tDebt=0, tPaid=0, tExp=0;
 
         agents.forEach(a => {
             if(a.trans) Object.values(a.trans).forEach(t => {
@@ -788,6 +912,7 @@
 
         expenses.forEach(e => {
             let amt=parseFloat(e.amount), time=new Date(e.date).getTime();
+            tExp += amt;
             if(time>=startDay)s.ed+=amt;
             if(time>=startWeek)s.ew+=amt;
             if(time>=startMonth)s.em+=amt;
@@ -807,8 +932,75 @@
 
         document.getElementById('totalDebt').innerText=fmt(tDebt);
         document.getElementById('totalPaid').innerText=fmt(tPaid);
+        const netAll = tPaid - tExp;
+        const netEl = document.getElementById('totalNet');
+        if(netEl) netEl.innerText = fmt(netAll);
         document.getElementById('agCount').innerText=agents.length;
+        renderDashChartSeries();
     }
+
+
+    // ===== Dashboard Chart (last 6 months) =====
+    function renderDashChartSeries(){
+        const canvas = document.getElementById('dashChart');
+        if(!canvas || typeof Chart === 'undefined') return;
+
+        // Build last 6 months labels
+        const now = new Date();
+        const months = [];
+        for(let i=5;i>=0;i--){
+            const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+            months.push({key, label: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}`});
+        }
+
+        const debtSeries = months.map(()=>0);
+        const paidSeries = months.map(()=>0);
+        const expSeries  = months.map(()=>0);
+
+        agents.forEach(a=>{
+            if(!a.trans) return;
+            Object.values(a.trans).forEach(t=>{
+                const d = (t.date||'').split('T')[0];
+                const ym = d ? d.slice(0,7) : '';
+                const idx = months.findIndex(x=>x.key===ym);
+                if(idx>=0){
+                    const amt = safeNum(t.amt);
+                    if(t.type==='debt') debtSeries[idx] += amt;
+                    else paidSeries[idx] += amt;
+                }
+            });
+        });
+
+        expenses.forEach(e=>{
+            const d = (e.date||'').split('T')[0];
+            const ym = d ? d.slice(0,7) : '';
+            const idx = months.findIndex(x=>x.key===ym);
+            if(idx>=0) expSeries[idx] += safeNum(e.amount);
+        });
+
+        const labels = months.map(x=>x.label);
+
+        if(dashChart) { try{ dashChart.destroy(); }catch(e){} dashChart=null; }
+
+        dashChart = new Chart(canvas, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    { label: 'ديون', data: debtSeries },
+                    { label: 'تسديد', data: paidSeries },
+                    { label: 'مصاريف', data: expSeries }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    }
+
 
     // ===== Agents UI =====
     function calcAgentBalance(a){
@@ -834,14 +1026,16 @@
 
         res.forEach((a, i) => {
             let bal = calcAgentBalance(a);
+            const warn = (bal > 0 && bal >= DEBT_ALERT_LIMIT);
             const canDelete = (currentUser && currentUser.role==='admin' && bal===0);
 
             list.innerHTML += `
-                <div class="list-item" onclick="openDetails('${a.id}')">
+                <div class="list-item" ${warn ? 'style="background:#fff1f2; border:1px solid #fecaca"' : ''} onclick="openDetails('${a.id}')">
                     <div style="display:flex; align-items:center; gap:10px">
                         <span style="background:#e2e8f0; width:25px; height:25px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:bold">${i+1}</span>
                         <div class="item-details">
-                            <h4>${a.name}</h4>
+                            <h4>${a.name} ${warn ? `<span style="background:#dc2626; color:#fff; padding:2px 8px; border-radius:999px; font-size:0.7rem; margin-right:6px">دين عالي</span>` : ``}</h4>
+                            <small style="color:#64748b; font-weight:700">تاريخ الإضافة: ${a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB') : ''}</small>
                             <p>${a.phone||''} | ${a.address||''}</p>
                         </div>
                     </div>
@@ -882,6 +1076,7 @@
         let total = 0;
 
         let res = expenses;
+        if(currentExpFilter !== "all"){ res = res.filter(e => (e.category||"") === currentExpFilter); }
         if(txt) res = res.filter(e => (e.type||'').includes(txt) || (e.note && e.note.includes(txt)));
         if(from) res = res.filter(e => (e.date||'').split('T')[0] >= from);
         if(to) res = res.filter(e => (e.date||'').split('T')[0] <= to);
@@ -903,6 +1098,25 @@
         });
 
         document.getElementById('expTotal').innerText = fmt(total);
+
+        
+        // حساب سنوي (من 1/1 الى 31/12 السنة الحالية)
+        let yearTotal = 0;
+        const now = new Date();
+        const startYear = new Date(now.getFullYear(), 0, 1).getTime();
+        const endYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59).getTime();
+
+        expenses.forEach(e => {
+            const time = new Date(e.date).getTime();
+            if(time >= startYear && time <= endYear){
+                yearTotal += parseFloat(e.amount || 0);
+            }
+        });
+
+        const yEl = document.getElementById('expYearTotal');
+        if(yEl) yEl.innerText = fmt(yearTotal);
+
+
     }
     function updateExpUI() { renderExpensesList(); }
 
@@ -968,13 +1182,18 @@
                 <label class="form-label">نوع الصرف</label><input id="inExType" class="app-input" placeholder="مثال: رواتب / ايجارات / يومي">
                 <label class="form-label">تصنيف</label>
 
+
 <select id="inExCat" class="app-input">
-  <option value="مصروف يومي">مصروف يومي</option>
+  <option value="يومي">يومي</option>
+  <option value="اسبوعي">اسبوعي</option>
+  <option value="شهري">شهري</option>
+  <option value="سنوي">سنوي</option>
   <option value="رواتب">رواتب</option>
   <option value="إيجارات">إيجارات</option>
 </select>
 
-<label class="form-label">المبلغ</label><input id="inExAmt" class="app-input" onkeyup="fmtInput(this)">
+
+<label class="form-label">المبلغ</label><input id="inExAmt" class="app-input" oninput="formatNumberInput(this)">
                 <label class="form-label">ملاحظات</label><input id="inExNote" class="app-input">
                 <button class="btn-main" style="background:var(--orange)" onclick="saveExp()">حفظ</button>
                 <button class="btn-main" style="background:#ccc; margin-top:5px" onclick="closeModal()">إلغاء</button>`;
@@ -1275,13 +1494,16 @@
     window.printStatement = () => {
         const a = agents.find(x => x.id == curAgentId);
         document.getElementById('stmt-client').innerText = a.name;
-        document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('ar-EG');
+        
+        document.getElementById('stmt-phone').innerText = (a.phone||'');
+        document.getElementById('stmt-address').innerText = (a.address||'');
+document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('ar-EG');
 
         const t = document.getElementById('stmt-body'); t.innerHTML = '';
         let d=0, p=0;
 
         if(a.trans) {
-            Object.values(a.trans).sort((x,y) => new Date(x.date) - new Date(y.date)).forEach(x => {
+            Object.values(a.trans).sort((x,y) => new Date(y.date) - new Date(x.date)).forEach(x => {
                 const isD = x.type==='debt';
                 if(isD) d+=parseFloat(x.amt); else p+=parseFloat(x.amt);
                 t.innerHTML += `<tr>
@@ -1304,7 +1526,35 @@
     function printElem(id, name) {
         const e = document.getElementById(id);
         e.style.display = 'block';
-        html2pdf().from(e).save(`${name}_${new Date().toISOString().slice(0,10)}.pdf`).then(() => e.style.display = 'none');
+        const filename = `${name}_${new Date().toISOString().slice(0,10)}.pdf`;
+        const opt = {
+            margin: [10, 10, 10, 10],
+            filename: filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        html2pdf().set(opt).from(e).save().then(() => { e.style.display = 'none'; });
+    }
+
+    // Generate PDF blob (for sharing)
+    async function pdfBlobFromElem(id, name){
+        const e = document.getElementById(id);
+        e.style.display = 'block';
+        const opt = {
+            margin: [10, 10, 10, 10],
+            filename: `${name}_${new Date().toISOString().slice(0,10)}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        try{
+            const worker = html2pdf().set(opt).from(e);
+            const blob = await worker.outputPdf('blob');
+            return blob;
+        }finally{
+            e.style.display = 'none';
+        }
     }
 
     // ===== Reports =====
@@ -1445,13 +1695,82 @@
     }
 
      // WhatsApp link
-    window.waLink = () => {
-        const a = (window.agents||agents||[]).find(x => x.id == curAgentId);
-        if(a && a.phone) openWhatsApp(a.phone);
-        else alert('رقم الواتساب غير موجود');
-    }
+    
+    // ===== VIP PRO: Print last transaction receipt + WhatsApp message =====
+    window.printLastReceipt = () => {
+        const a = agents.find(x => x.id == curAgentId);
+        if(!a) return alert("الوكيل غير موجود");
+        const trans = a.trans ? Object.values(a.trans) : [];
+        if(trans.length===0) return alert("لا توجد حركات لهذا الوكيل");
+        trans.sort((x,y)=> new Date(y.date) - new Date(x.date));
+        const t0 = trans[0];
 
-    // Clock
+        document.getElementById('rcp-client').innerText = a.name || '';
+        document.getElementById('rcp-phone').innerText = a.phone || '';
+        document.getElementById('rcp-address').innerText = a.address || '';
+        document.getElementById('rcp-date').innerText = (t0.date ? new Date(t0.date).toLocaleString('ar-EG') : new Date().toLocaleString('ar-EG'));
+        document.getElementById('rcp-voucher').innerText = t0.voucherNo || '';
+        document.getElementById('rcp-type').innerText = (t0.type==='debt' ? 'دين' : 'تسديد');
+        document.getElementById('rcp-amt').innerText = fmt(t0.amt || 0);
+        document.getElementById('rcp-note').innerText = t0.note || '';
+
+        // PDF
+        printElem('receipt-layout', `وصل_${a.name}`);
+
+        // WhatsApp text (بدون إرفاق ملف تلقائي بسبب قيود المتصفح)
+        try{
+            const phone = String(a.phone||'').replace(/\D/g,'');
+            const msg =
+`شركة المسار نت
+وصل ${t0.type==='debt'?'دين':'تسديد'}
+الوكيل: ${a.name}
+المبلغ: ${fmt(t0.amt||0)} د.ع
+التاريخ: ${t0.date ? new Date(t0.date).toLocaleString('ar-EG') : ''}
+رقم الوصل: ${t0.voucherNo||''}`;
+            if(phone){
+                window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg), '_blank');
+            }
+        }catch(e){}
+    };
+
+
+window.waLink = async () => {
+        const a = (typeof agents !== 'undefined' && Array.isArray(agents) ? agents : (window.agents||[])).find(x => x.id == curAgentId);
+        if(!a || !a.phone) return alert('رقم الواتساب غير موجود');
+
+        // Prepare a short message
+        const bal = calcAgentBalance(a);
+        const msg = `كشف حساب - شركة المسار نت
+`+
+                    `الوكيل: ${a.name}
+`+
+                    `الهاتف: ${a.phone||''}
+`+
+                    `العنوان: ${a.address||''}
+`+
+                    `الرصيد الحالي: ${fmt(bal)}
+`+
+                    `ملاحظة: إذا ظهر الملف، أرفقه هنا.`; 
+
+        // Try to generate PDF and share as a file (works on many Android phones)
+        try{
+            // fill statement fields first
+            try{ printStatement(); }catch(e){}
+            // generate blob without forcing download
+            const blob = await pdfBlobFromElem('statement-layout', `كشف_حساب_${a.name}`);
+            const file = new File([blob], `كشف_حساب_${a.name}.pdf`, {type:'application/pdf'});
+
+            if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+                await navigator.share({ files:[file], text: msg });
+                return;
+            }
+        }catch(err){
+            console.log(err);
+        }
+
+        // Fallback: open WhatsApp with text only (user can attach downloaded PDF)
+        openWhatsApp(a.phone, msg);
+    }// Clock
     setInterval(() => {
         const d = new Date();
         document.getElementById('clock').innerText = d.toLocaleTimeString('en-US', {hour12:true, hour:'2-digit', minute:'2-digit'});
@@ -1837,6 +2156,61 @@ setTimeout(addWAButton, 1600);
 font-size:14px;color:#555;">
 جميع الحقوق المحفوظة لشركة المسار 2026 ©<br>المصمم اورهان
 </div>
+
+
+<script>
+// ===== Excel Export (ROBUST) =====
+window.downloadExpensesExcel = function () {
+  try {
+    // اجلب البيانات (إذا عندك فلترة لاحقاً نربطها)
+    const data = (window.expenses || []).slice();
+
+    // CSV UTF-8 BOM for Arabic
+    let csv = "\ufeff" + "ت,النوع,التصنيف,المبلغ,التاريخ,ملاحظات\n";
+    data.forEach((e, i) => {
+      const row = [
+        (i + 1),
+        (e.type || "").toString().replace(/,/g, " "),
+        (e.category || "").toString().replace(/,/g, " "),
+        (e.amount ?? 0),
+        (e.date || ""),
+        (e.note || "").toString().replace(/,/g, " ")
+      ];
+      csv += row.join(",") + "\n";
+    });
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+
+    // Edge/IE fallback
+    if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+      window.navigator.msSaveOrOpenBlob(blob, "expenses_export.csv");
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "expenses_export.csv";
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+
+    // بعض البيئات (PWA/قيود) تحتاج حدث ماوس حقيقي
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    console.error(err);
+    alert("تعذر تحميل ملف Excel. جرب فتح الملف بمتصفح Chrome عادي (مو PWA) أو عطّل مانع التنزيلات.");
+  }
+};
+</script>
+
+
+<script>
+
+</script>
 
 </body>
 </html>
@@ -2335,6 +2709,25 @@ setTimeout(addPDFButtons, 1000);
       });
 
       document.getElementById('expTotal').innerText = fmt(total);
+
+        
+        // حساب سنوي (من 1/1 الى 31/12 السنة الحالية)
+        let yearTotal = 0;
+        const now = new Date();
+        const startYear = new Date(now.getFullYear(), 0, 1).getTime();
+        const endYear = new Date(now.getFullYear(), 11, 31, 23, 59, 59).getTime();
+
+        expenses.forEach(e => {
+            const time = new Date(e.date).getTime();
+            if(time >= startYear && time <= endYear){
+                yearTotal += parseFloat(e.amount || 0);
+            }
+        });
+
+        const yEl = document.getElementById('expYearTotal');
+        if(yEl) yEl.innerText = fmt(yearTotal);
+
+
     } catch(e){
       old();
     }
@@ -2575,191 +2968,8 @@ setTimeout(addPDFButtons, 1000);
 
 
 <!-- ====================== EXPENSE CATEGORIES (DAILY / SALARIES / RENTS) + TOTALS (SAFE APPEND) ====================== -->
-<style>
-.exp-cat-tabs{display:flex; gap:6px; flex-wrap:wrap; margin:10px 0;}
-.exp-cat-tab{padding:8px 12px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; cursor:pointer; font-family:'Tajawal'; font-weight:800; font-size:.9rem;}
-.exp-cat-tab.active{background:#f59e0b; color:#fff; border-color:#f59e0b;}
-.exp-cat-card{background:#fff; border-radius:12px; padding:10px; margin-top:10px; box-shadow:0 2px 5px rgba(0,0,0,0.05);}
-.exp-cat-head{display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #f1f5f9; padding-bottom:8px; margin-bottom:8px;}
-.exp-cat-title{font-weight:900; color:#0f172a;}
-.exp-cat-sum{font-weight:900; color:#c2410c; direction:ltr;}
-</style>
 
-<script>
-/*
-  الهدف:
-  - فرز المصاريف إلى: مصروف يومي / رواتب / إيجارات (مع إمكانية "أخرى")
-  - عرض كل قسم وحده + مجموع القسم
-  - الإبقاء على "المجموع الكلي" مثل ما هو
-  - بدون حذف أي شيء من قاعدة البيانات أو الواجهة الأصلية
-*/
 
-(function(){
-  // state
-  window.__expCatFilter = window.__expCatFilter || 'all'; // all | daily | salary | rent | other
-
-  function normalizeType(t){
-    t = (t||"").trim();
-    // match Arabic keywords
-    const low = t.replace(/\s+/g,' ');
-    if(/رواتب|راتب/.test(low)) return 'salary';
-    if(/ايجار|إيجار|اجار/.test(low)) return 'rent';
-    if(/يومي|مصروف يومي/.test(low)) return 'daily';
-    return 'other';
-  }
-
-  function catLabel(k){
-    if(k==='daily') return '📌 مصروف يومي';
-    if(k==='salary') return '👷 رواتب';
-    if(k==='rent') return '🏠 إيجارات';
-    if(k==='other') return '🧾 أخرى';
-    return 'الكل';
-  }
-
-  function ensureExpenseTabs(){
-    const view = document.getElementById('expensesView');
-    if(!view) return;
-
-    // put tabs right under the "+ مصروف جديد" button
-    if(document.getElementById('expCatTabs')) return;
-
-    const btnAdd = view.querySelector('button.btn-main[onclick*="openModal(\'expense\')"]');
-    if(!btnAdd) return;
-
-    const tabs = document.createElement('div');
-    tabs.id = "expCatTabs";
-    tabs.className = "exp-cat-tabs";
-    tabs.innerHTML = `
-      <button class="exp-cat-tab" data-cat="all">الكل</button>
-      <button class="exp-cat-tab" data-cat="daily">مصروف يومي</button>
-      <button class="exp-cat-tab" data-cat="salary">رواتب</button>
-      <button class="exp-cat-tab" data-cat="rent">إيجارات</button>
-      <button class="exp-cat-tab" data-cat="other">أخرى</button>
-    `;
-
-    btnAdd.insertAdjacentElement('afterend', tabs);
-
-    const setActive = () => {
-      tabs.querySelectorAll('.exp-cat-tab').forEach(b=>{
-        b.classList.toggle('active', b.getAttribute('data-cat') === window.__expCatFilter);
-      });
-    };
-    setActive();
-
-    tabs.addEventListener('click', (e)=>{
-      const b = e.target.closest('.exp-cat-tab');
-      if(!b) return;
-      window.__expCatFilter = b.getAttribute('data-cat') || 'all';
-      setActive();
-      if(typeof window.renderExpensesList === 'function') window.renderExpensesList();
-    });
-  }
-
-  // enhance expenses list to split categories (while keeping original filters: text + date)
-  if(typeof window.renderExpensesList === 'function' && !window.__expCatPatched){
-    window.__expCatPatched = true;
-    const old = window.renderExpensesList;
-
-    window.renderExpensesList = function(){
-      try{
-        ensureExpenseTabs();
-
-        const list = document.getElementById('expensesListUI');
-        if(!list) return old();
-
-        const txt = document.getElementById('expSearchText')?.value || '';
-        const from = document.getElementById('expFrom')?.value || '';
-        const to = document.getElementById('expTo')?.value || '';
-
-        let res = Array.isArray(expenses) ? expenses.slice() : [];
-        // original filters
-        if(txt) res = res.filter(e => (e.type||'').includes(txt) || (e.note||'').includes(txt));
-        if(from) res = res.filter(e => (e.date||'').split('T')[0] >= from);
-        if(to) res = res.filter(e => (e.date||'').split('T')[0] <= to);
-
-        // newest first
-        res.sort((a,b)=> new Date(b.date) - new Date(a.date));
-
-        // overall total (still shown in header box #expTotal)
-        let overall = 0;
-        res.forEach(e => overall += Number(e.amount||0));
-        const expTotalEl = document.getElementById('expTotal');
-        if(expTotalEl) expTotalEl.innerText = fmt(overall);
-
-        // group by category
-        const groups = { daily: [], salary: [], rent: [], other: [] };
-        res.forEach(e=>{
-          const k = normalizeType(e.type);
-          groups[k].push(e);
-        });
-
-        // apply category filter if not all
-        let renderKeys = ['daily','salary','rent','other'];
-        if(window.__expCatFilter && window.__expCatFilter !== 'all'){
-          renderKeys = [window.__expCatFilter];
-        }
-
-        // render sections
-        list.innerHTML = '';
-        let serial = 0;
-
-        renderKeys.forEach(k=>{
-          const arr = groups[k] || [];
-          if(arr.length === 0){
-            // don't show empty section if filtering one category? show message
-            if(window.__expCatFilter && window.__expCatFilter !== 'all'){
-              list.innerHTML = '<div style="text-align:center; padding:20px; color:gray">لا توجد نتائج</div>';
-            }
-            return;
-          }
-
-          let sum = 0;
-          arr.forEach(e => sum += Number(e.amount||0));
-
-          const section = document.createElement('div');
-          section.className = 'exp-cat-card';
-          section.innerHTML = `
-            <div class="exp-cat-head">
-              <div class="exp-cat-title">${catLabel(k)}</div>
-              <div class="exp-cat-sum">المجموع: ${fmt(sum)}</div>
-            </div>
-            <div class="exp-cat-body" id="exp-body-${k}"></div>
-          `;
-          list.appendChild(section);
-
-          const body = section.querySelector(`#exp-body-${k}`);
-          arr.forEach((e, i) => {
-            serial++;
-            const dt = e.date ? new Date(e.date).toLocaleString('en-GB') : '';
-            body.innerHTML += `
-              <div class="list-item">
-                <div style="display:flex; align-items:center; gap:10px">
-                  <span style="background:#fff7ed; color:#c2410c; width:25px; height:25px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:bold">${serial}</span>
-                  <div class="item-details">
-                    <h4>${e.type||''}</h4>
-                    <p>${dt} | ${e.note||''}</p>
-                  </div>
-                </div>
-                <div style="text-align:left; display:flex; align-items:center">
-                  <div style="font-weight:bold; color:var(--orange)">${fmt(e.amount||0)}</div>
-                  <button onclick="editExp('${e.id}')" class="action-btn-small" style="background:#ffedd5; color:#c2410c">✏️</button>
-                </div>
-              </div>`;
-          });
-        });
-
-      }catch(e){
-        old();
-      }
-    };
-
-    // ensure tabs exist after navigation
-    setTimeout(()=>{ try{ ensureExpenseTabs(); }catch(e){} }, 1200);
-    setInterval(()=>{ try{ ensureExpenseTabs(); }catch(e){} }, 5000);
-  }
-
-})();
-</script>
 <!-- ====================== END EXPENSE CATEGORIES ====================== -->
 
 
@@ -4242,8 +4452,88 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
   }, 1800);
 
 })();
+
+
+// ===== 
+// ===== Agents Excel Export (PWA SAFE) =====
+
+
+
+// ===== Agents Excel Export (ROBUST + PWA SAFE) =====
+window.downloadAgentsExcel = function () {
+  try {
+    const search = (document.getElementById('agSearch')?.value || '').trim();
+    let res = (typeof agents !== 'undefined' && Array.isArray(agents)) ? agents.slice() : (window.agents || []).slice();
+
+    if (search) {
+      res = res.filter(a =>
+        ((a.name||'').includes(search)) ||
+        ((a.phone||'').includes(search)) ||
+        ((a.address||'').includes(search))
+      );
+    }
+
+    res.sort((a,b)=> (new Date(b.createdAt||0).getTime()) - (new Date(a.createdAt||0).getTime()));
+
+    if (res.length === 0) {
+      alert("لا توجد بيانات للتصدير");
+      return;
+    }
+
+    let csv = "\ufeff" + "ت,اسم الوكيل,الهاتف,العنوان,ملاحظات,تاريخ الإضافة\n";
+    res.forEach((a,i)=>{
+      const row = [
+        (i+1),
+        String(a.name||'').replace(/,/g,' '),
+        String(a.phone||'').replace(/,/g,' '),
+        String(a.address||'').replace(/,/g,' '),
+        String(a.note||'').replace(/,/g,' '),
+        (a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB') : '')
+      ];
+      csv += row.join(",") + "\n";
+    });
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+
+    // IE/Edge legacy
+    if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+      window.navigator.msSaveOrOpenBlob(blob, "agents_export.csv");
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "agents_export.csv";
+    a.target = "_blank";
+    a.rel = "noopener";
+    document.body.appendChild(a);
+
+    // Real click event
+    a.dispatchEvent(new MouseEvent("click", { bubbles:true, cancelable:true, view:window }));
+    a.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(url), 1200);
+
+    // Fallback (some PWA block blob downloads)
+    setTimeout(()=>{
+      try{
+        const dataUrl = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+        const b = document.createElement("a");
+        b.href = dataUrl;
+        b.download = "agents_export.csv";
+        document.body.appendChild(b);
+        b.click();
+        b.remove();
+      }catch(_){}
+    }, 200);
+  } catch (err) {
+    console.error(err);
+    alert("تعذر تحميل Excel للوكلاء");
+  }
+};
+
 </script>
 <!-- ====================== END VIP PACK ====================== -->
-
 
 
