@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام حسابات شركة المسار</title>
+    <title>نظام حسابات المسار</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -808,10 +808,11 @@
     let db;
     let currentUser = null;
     // صلاحيات (Roles)
-    function isAdmin(){ return !!(currentUser && currentUser.role==='admin'); }
+    function isAdmin(){ return !!(currentUser && ['admin','manager','agents_admin'].includes(__roleNorm(currentUser.role))); }
     function canManageAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin')); }
     function canDeleteAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin' || currentUser.role==='manager')); }
-    function canManageUsers(){ return !!(currentUser && currentUser.role==='admin'); }
+    function __roleNorm(r){return String(r||'').trim().toLowerCase();}
+    function canManageUsers(){ return !!(currentUser && __roleNorm(currentUser.role)==='admin'); }
 
     function genId(){
         try{
@@ -1567,7 +1568,7 @@ try{
 
     function nav(view) {
         // حماية: الموظف ما يدخل إدارة الحسابات
-        if (view === 'users' && (!currentUser || currentUser.role !== 'admin')) {
+        if (view === 'users' && (!currentUser || __roleNorm(currentUser.role) !== 'admin')) {
             alert("عذراً، هذه الصلاحية للأدمن فقط");
             return;
         }
@@ -2915,7 +2916,7 @@ window.deleteAgent = function(id, e){
 if(typeof window.delUser === "function"){
   const oldDelUser = window.delUser;
   window.delUser = function(u){
-    if(!isAdmin()){
+    if(!canManageUsers()){
       alert("🚫 الحذف مسموح للأدمن فقط");
       return;
     }
@@ -4159,10 +4160,10 @@ setTimeout(addPDFButtons, 1000);
 (function(){
   window.deleteAgent = function(agentId){
     try{
-      if(!currentUser || currentUser.role !== 'admin'){
-        alert("صلاحية الحذف للأدمن فقط");
-        return;
-      }
+      if(!currentUser || !['admin','agents_admin','manager'].includes(__roleNorm(currentUser.role))){
+          alert("❌ الحذف مسموح للأدمن/مدير/أدمن وكلاء فقط");
+          return;
+        }
       const a = (agents||[]).find(x => String(x.id) === String(agentId));
       if(!a) return alert("الوكيل غير موجود");
       if(!confirm(`⚠️ حذف الوكيل: ${a.name}\nسيتم حذف كل حركاته أيضاً.\nهل أنت متأكد؟`)) return;
@@ -4304,10 +4305,10 @@ setTimeout(addPDFButtons, 1000);
   // Replace delete with archive (soft delete)
   window.deleteAgent = function(agentId){
     try{
-      if(!currentUser || currentUser.role !== 'admin'){
-        alert("صلاحية العملية للأدمن فقط");
-        return;
-      }
+      if(!currentUser || !['admin','agents_admin','manager'].includes(__roleNorm(currentUser.role))){
+          alert("❌ العملية مسموحة للأدمن/مدير/أدمن وكلاء فقط");
+          return;
+        }
 
       const a = (agents||[]).find(x => String(x.id) === String(agentId));
       if(!a) return alert("الوكيل غير موجود");
