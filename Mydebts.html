@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام شركة المسار</title>
+    <title>نظام حسابات شركة المسار</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -807,6 +807,19 @@
 
     let db;
     let currentUser = null;
+    // صلاحيات (Roles)
+    function isAdmin(){ return !!(currentUser && currentUser.role==='admin'); }
+    function canManageAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin')); }
+    function canDeleteAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin' || currentUser.role==='manager')); }
+    function canManageUsers(){ return !!(currentUser && currentUser.role==='admin'); }
+
+    function genId(){
+        try{
+            if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        }catch(e){}
+        return 'id_' + Date.now() + '_' + Math.floor(Math.random()*1000000);
+    }
+
     var agents = [];
     var expenses = [];
     var users = [];
@@ -1095,7 +1108,7 @@ try{
         res.forEach((a, i) => {
             let bal = calcAgentBalance(a);
             const warn = (bal > 0 && bal >= DEBT_ALERT_LIMIT);
-            const canDelete = (currentUser && currentUser.role==='admin' && bal===0);
+            const canDelete = (canDeleteAgents() && bal===0);
 
             list.innerHTML += `
                 <div class="list-item" ${warn ? 'style="background:#fff1f2; border:1px solid #fecaca"' : ''} onclick="openDetails('${a.id}')">
@@ -1122,7 +1135,7 @@ try{
 
     window.deleteAgent = function(id, e){
         e.stopPropagation();
-        if(!currentUser || currentUser.role!=='admin') return alert("عذراً، حذف الوكلاء للأدمن فقط");
+        if(!canDeleteAgents()) return alert("عذراً، حذف الوكلاء للأدمن فقط");
         const a = agents.find(x=>x.id==id);
         if(!a) return;
 
@@ -1131,7 +1144,7 @@ try{
 
         if(confirm(`حذف الوكيل: ${a.name} ؟`)){
             db.ref('agents/'+id).remove();
-            log(`حذف وكيل: ${a.name}`);
+            log(`حذف وكيل: ${a.name}`, {action:'delete_agent', agentId:id, agentName:a.name, balance:bal});
         }
     }
 
@@ -1237,6 +1250,7 @@ try{
     function openModal(type) {
         const m = document.getElementById('modal'); const b = document.getElementById('modalBody'); m.style.display = 'flex';
         if(type === 'agent') {
+            if(!canManageAgents()) { alert('عذراً، لا تملك صلاحية تعديل الوكلاء'); return; }
             b.innerHTML = `<h3 style="text-align:center; margin-bottom:20px">وكيل جديد</h3>
                 <label class="form-label">اسم الوكيل</label><input id="inAgName" class="app-input">
                 <label class="form-label">رقم الهاتف</label><input id="inAgPhone" class="app-input">
@@ -1267,6 +1281,12 @@ try{
             b.innerHTML = `<h3 style="text-align:center">مستخدم جديد</h3>
                 <label class="form-label">اسم المستخدم</label><input id="inUser" class="app-input">
                 <label class="form-label">كلمة المرور</label><input id="inPass" class="app-input">
+                <label class="form-label">الصلاحية</label>
+                <select id="inRole" class="app-input">
+                    <option value="user">موظف</option>
+                    <option value="agents_admin">أدمن وكلاء (تعديل الوكلاء)</option>
+                    <option value="admin">أدمن كامل</option>
+                </select>
                 <button class="btn-main btn-primary" onclick="saveUser()">حفظ</button>
                 <button class="btn-main" style="background:#ccc; margin-top:5px" onclick="closeModal()">إلغاء</button>`;
         }
@@ -1275,24 +1295,25 @@ try{
     function closeModal() { document.getElementById('modal').style.display = 'none'; editId = null; editingUser = null; }
 
     function saveAgent() {
-        const n = document.getElementById('inAgName').value; if(!n) return alert("الاسم مطلوب");
-        let d = (document.getElementById('inExDate') ? document.getElementById('inExDate').value : '');
-        if(!d){
-            const now = new Date();
-            const off = now.getTimezoneOffset();
-            d = new Date(now.getTime()-off*60000).toISOString().slice(0,16);
-        }
-        const obj = { type: t, category: (document.getElementById('inExCat')?document.getElementById('inExCat').value:'أخرى'), amount: a, date: d, note: document.getElementById('inExNote').value, voucherNo: (window.nextVoucher?nextVoucher('MASAR-EX'): '') };
+        // حفظ/تعديل الوكيل (اسم/هاتف/عنوان/ملاحظات)
+        if(!canManageAgents()) return alert("عذراً، لا تملك صلاحية تعديل الوكلاء");
+        const n = (document.getElementById('inAgName').value || '').trim(); if(!n) return alert("الاسم مطلوب");
+        const ph = (document.getElementById('inAgPhone').value || '').trim();
+        const ad = (document.getElementById('inAgAddr').value || '').trim();
+        const nt = (document.getElementById('inAgNote').value || '').trim();
+
         if(editId) {
-            db.ref('agents/' + editId).update(obj).then(() => updateAgentsUI());
-            log(`عدل وكيل: ${n}`);
+            // تحديث بيانات الوكيل فقط بدون لمس الحركات
+            db.ref('agents/' + editId).update({name:n, phone:ph, address:ad, note:nt, updatedAt:new Date().toISOString()}).then(() => updateAgentsUI());
+            log(`عدل وكيل: ${n}`, {action:'update_agent', agentId: editId, agentName:n});
         } else {
-            const id = Date.now();
-            db.ref('agents/' + id).set({...obj, id: id, trans: {}, createdAt: new Date().toISOString()});
-            log(`أضاف وكيل: ${n}`);
+            const id = genId();
+            db.ref('agents/' + id).set({id:id, name:n, phone:ph, address:ad, note:nt, createdAt:new Date().toISOString(), trans:{}}).then(()=>updateAgentsUI());
+            log(`أضاف وكيل: ${n}`, {action:'create_agent', agentId:id, agentName:n});
         }
         closeModal();
     }
+
 
     
     function saveExp() {
@@ -1315,7 +1336,9 @@ try{
             amount: a,
             date: isoDate,
             note: (document.getElementById('inExNote') ? document.getElementById('inExNote').value : ''),
-            voucherNo: (window.nextVoucher ? nextVoucher('MASAR-EX') : '')
+            voucherNo: (window.nextVoucher ? nextVoucher('MASAR-EX') : ''),
+            by: (currentUser && currentUser.username) ? currentUser.username : 'system',
+            createdAt: new Date().toISOString()
         };
 
         // حفظ مع تأكيد نجاح/فشل (حتى ما تضيف وما يطلع شي)
@@ -1324,20 +1347,20 @@ try{
 
         if(editId) {
             db.ref('expenses/' + editId).update(obj).then(() => {
-                try{ log(`عدل مصروف: ${t}`); }catch(e){}
+                try{ log(`عدل مصروف: ${t}`, {action:'update_expense', expenseId: editId, type:t, amount:a}); }catch(e){}
                 done();
             }).catch(fail);
         } else {
             const id = Date.now();
             db.ref('expenses/' + id).set({...obj, id: id}).then(() => {
-                try{ log(`أضاف مصروف: ${t} (${fmt(a)})`); }catch(e){}
+                try{ log(`أضاف مصروف: ${t} (${fmt(a)})`, {action:'create_expense', expenseId:id, type:t, amount:a}); }catch(e){}
                 done();
             }).catch(fail);
         }
     }
 
     function saveUser() {
-        if(!currentUser || currentUser.role!=='admin') return alert("عذراً، الأدمن فقط");
+        if(!canManageUsers()) return alert("عذراً، الأدمن فقط");
         if(editingUser) {
             const p = document.getElementById('inPass').value;
             if(!p) return alert("كلمة المرور مطلوبة");
@@ -1346,7 +1369,8 @@ try{
         } else {
             const u = document.getElementById('inUser').value, p = document.getElementById('inPass').value;
             if(!u || !p) return alert("أكمل الحقول");
-            db.ref('users/' + u).set({username:u, pass:p, role:'user', blocked:false});
+            const r = (document.getElementById('inRole')?document.getElementById('inRole').value:'user');
+            db.ref('users/' + u).set({username:u, pass:p, role:r, blocked:false});
             log(`أضاف مستخدم: ${u}`);
         }
         closeModal();
@@ -1354,6 +1378,7 @@ try{
 
     function editAgent(id, e) {
         e.stopPropagation();
+        if(!canManageAgents()) return alert("عذراً، لا تملك صلاحية تعديل الوكلاء");
         const a = agents.find(x => x.id == id);
         editId = id;
         openModal('agent');
@@ -1380,7 +1405,7 @@ try{
     }
 
     window.editUser = function(username) {
-        if(!currentUser || currentUser.role!=='admin') return alert("عذراً، الأدمن فقط");
+        if(!canManageUsers()) return alert("عذراً، الأدمن فقط");
         editingUser = username;
         const m = document.getElementById('modal'); const b = document.getElementById('modalBody'); m.style.display = 'flex';
         b.innerHTML = `<h3 style="text-align:center">تعديل المستخدم: ${username}</h3>
@@ -1432,7 +1457,7 @@ try{
     }
 
     window.deleteAgentIfZero = function(){
-        if(!currentUser || currentUser.role!=='admin') return alert("عذراً، الأدمن فقط");
+        if(!canManageUsers()) return alert("عذراً، الأدمن فقط");
         const a = agents.find(x=>x.id==curAgentId);
         if(!a) return;
         const bal = calcAgentBalance(a);
@@ -1458,7 +1483,10 @@ try{
     function saveTrans(type) {
         const aVal = parseFloat((document.getElementById('inTrAmt').value||'').replace(/,/g,''));
         if(isNaN(aVal)) return alert("المبلغ مطلوب");
-        const obj = { type: type, amt: aVal, date: document.getElementById('inTrDate').value, note: document.getElementById('inTrNote').value, voucherNo: (window.nextVoucher?nextVoucher(type==='debt'?'MASAR-D':'MASAR-P'): '') };
+        const rawD = (document.getElementById('inTrDate') && document.getElementById('inTrDate').value) ? document.getElementById('inTrDate').value : '';
+        let isoD = '';
+        try{ isoD = rawD ? new Date(rawD).toISOString() : new Date().toISOString(); }catch(e){ isoD = new Date().toISOString(); }
+        const obj = { type: type, amt: aVal, date: isoD, note: (document.getElementById('inTrNote')?document.getElementById('inTrNote').value:''), voucherNo: (window.nextVoucher?nextVoucher(type==='debt'?'MASAR-D':'MASAR-P'): ''), by: (currentUser && currentUser.username)?currentUser.username:'system' };
 
         const ag = agents.find(x => x.id == curAgentId);
         const oldBal = ag ? calcAgentBalance(ag) : 0;
@@ -1469,14 +1497,20 @@ try{
         if(agIndex<0) return alert("الوكيل غير موجود");
         if(!agents[agIndex].trans) agents[agIndex].trans = {};
 
+        const fail = (err)=>{ alert('⚠️ لم يتم حفظ الحركة. راجع اتصال Firebase أو Rules.\n' + (err && err.message ? err.message : '')); };
+
         if(editId) {
-            db.ref(`agents/${curAgentId}/trans/${editId}`).update(obj);
-            agents[agIndex].trans[editId] = {...agents[agIndex].trans[editId], ...obj};
-            log(`عدل حركة للوكيل`);
+            db.ref(`agents/${curAgentId}/trans/${editId}`).update(obj).then(()=>{
+                agents[agIndex].trans[editId] = {...agents[agIndex].trans[editId], ...obj};
+                log('عدل حركة للوكيل', {agentId: curAgentId, transId: editId, kind:'update', type: type, amt: aVal});
+                try{ updateDash(); updateAgentsUI(); }catch(e){}
+            }).catch(fail);
         } else {
-            db.ref(`agents/${curAgentId}/trans/${id}`).set({...obj, id: id});
-            agents[agIndex].trans[id] = {...obj, id: id};
-            log(`أضاف ${type==='debt'?'دين':'تسديد'} للوكيل: ${fmt(aVal)}`);
+            db.ref(`agents/${curAgentId}/trans/${id}`).set({...obj, id: id}).then(()=>{
+                agents[agIndex].trans[id] = {...obj, id: id};
+                log(`أضاف ${type==='debt'?'دين':'تسديد'} للوكيل: ${fmt(aVal)}`, {agentId: curAgentId, transId: id, kind:'create', type: type, amt: aVal});
+                try{ updateDash(); updateAgentsUI(); }catch(e){}
+            }).catch(fail);
         }
 
         // تنبيه عند زيادة الرصيد (دين جديد)
@@ -1502,14 +1536,31 @@ try{
         }, 200);
     }
 
-    function log(msg) {
+    function log(msg, meta){
+    try{
         const id = Date.now();
-        db.ref('logs/' + id).set({ text: `${currentUser.username} | ${msg}`, date: new Date().toISOString() });
+        const by = (currentUser && currentUser.username) ? currentUser.username : 'system';
+        const role = (currentUser && currentUser.role) ? currentUser.role : 'unknown';
+        const payload = {
+            id: id,
+            msg: String(msg||''),
+            by: by,
+            role: role,
+            date: new Date().toISOString(),
+            meta: meta || {}
+        };
+        // نص جاهز للعرض السريع أيضاً
+        payload.text = `${by} | ${payload.msg}`;
+        db.ref('logs/' + id).set(payload);
+    }catch(e){
+        // لا تعطل النظام بسبب سجل النشاطات
+        console.warn('log failed', e);
     }
+}
 
     window.toggleBlock = (u, s) => db.ref('users/'+u).update({blocked:s});
     window.delUser = (u) => {
-        if(!currentUser || currentUser.role!=='admin') return alert("عذراً، الأدمن فقط");
+        if(!canManageUsers()) return alert("عذراً، الأدمن فقط");
         if(u==='admin') return alert('لا يمكن حذف الأدمن');
         if(confirm('حذف؟')) db.ref('users/'+u).remove();
     }
@@ -1527,6 +1578,18 @@ try{
         localStorage.setItem('masar_view', view);
         if(view === 'main') localStorage.removeItem('masar_id');
         if(view === 'expenses') updateExpUI();
+        if(view === 'reports') {
+            try{
+                const repFrom = document.getElementById('repFrom');
+                const repTo = document.getElementById('repTo');
+                const now = new Date();
+                const first = new Date(now.getFullYear(), now.getMonth(), 1);
+                if(repFrom && !repFrom.value) repFrom.value = first.toISOString().slice(0,10);
+                if(repTo && !repTo.value) repTo.value = now.toISOString().slice(0,10);
+                const list = document.getElementById('repResult');
+                if(list) list.innerHTML = '';
+            }catch(e){}
+        }
     }
 
     function restoreView() {
@@ -1663,46 +1726,116 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
         runReport();
     }
 
-    window.runReport = () => {
-        const f = document.getElementById('repFrom').value;
-        const t = document.getElementById('repTo').value;
-        const list = document.getElementById('repResult'); list.innerHTML = '';
-        let sd=0, sp=0, se=0;
+    
+    // ===== Reports (FAST + with "who did it") =====
+    window.__reportCache = { data: [], page: 1, pageSize: 120 };
 
-        let all = [];
-        if(currentReportFilter === 'all' || currentReportFilter === 'agents') {
-            agents.forEach(a => {
-                if(a.trans) Object.values(a.trans).forEach(x => all.push({name:a.name, type:x.type==='debt'?'دين':'تسديد', amt:parseFloat(x.amt), date:x.date}));
-            });
-        }
-        if(currentReportFilter === 'all' || currentReportFilter === 'expenses') {
-            expenses.forEach(e => all.push({name:e.type, type:'مصروف', amt:parseFloat(e.amount), date:e.date}));
-        }
+    function __renderReportPage(){
+        const list = document.getElementById('repResult');
+        if(!list) return;
+        const {data, page, pageSize} = window.__reportCache;
+        const total = data.length;
+        const start = (page-1)*pageSize;
+        const end = Math.min(start + pageSize, total);
 
-        all.filter(x => {
-            let d = (x.date||'').split('T')[0];
-            return (!f || d >= f) && (!t || d <= t);
-        }).sort((a,b) => new Date(a.date) - new Date(b.date)).forEach(x => {
-            if(x.type === 'دين') sd += x.amt;
-            else if(x.type === 'تسديد') sp += x.amt;
-            else se += x.amt;
-
-            let color = x.type==='دين'?'var(--red)':(x.type==='تسديد'?'var(--green)':'var(--orange)');
-
-            list.innerHTML += `<div class="list-item">
-                <div><b>${x.name}</b> <small>(${x.type})</small></div>
+        // build HTML once (fast)
+        const out = [];
+        for(let i=start;i<end;i++){
+            const x = data[i];
+            const color = x.type==='دين'?'var(--red)':(x.type==='تسديد'?'var(--green)':'var(--orange)');
+            out.push(`<div class="list-item">
+                <div>
+                  <b>${x.name}</b> <small>(${x.type})</small><br>
+                  <small style="color:#555">🧑‍💼 ${x.by || 'غير معروف'} • 🧾 ${x.voucherNo || '-'}</small>
+                </div>
                 <div style="text-align:left">
                     <b style="color:${color}">${fmt(x.amt)}</b><br>
                     <small>${new Date(x.date).toLocaleDateString('en-GB')}</small>
                 </div>
-            </div>`;
+            </div>`);
+        }
+        list.innerHTML = out.join('');
+
+        // pager
+        const p = document.getElementById('repPager');
+        if(p){
+            const pages = Math.max(1, Math.ceil(total/pageSize));
+            p.innerHTML = `
+              <div style="display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:10px">
+                <button class="btn" onclick="__repPrev()" ${page<=1?'disabled':''}>⬅️ السابق</button>
+                <div style="font-weight:700">صفحة ${page} / ${pages} • عناصر ${start+1}-${end} من ${total}</div>
+                <button class="btn" onclick="__repNext()" ${page>=pages?'disabled':''}>التالي ➡️</button>
+              </div>`;
+        }
+    }
+    window.__repPrev = ()=>{ window.__reportCache.page = Math.max(1, (window.__reportCache.page||1)-1); __renderReportPage(); };
+    window.__repNext = ()=>{ 
+        const total = (window.__reportCache.data||[]).length;
+        const pages = Math.max(1, Math.ceil(total/(window.__reportCache.pageSize||120)));
+        window.__reportCache.page = Math.min(pages, (window.__reportCache.page||1)+1);
+        __renderReportPage();
+    };
+
+    window.runReport = () => {
+        const f = document.getElementById('repFrom').value;
+        const t = document.getElementById('repTo').value;
+
+        let sd=0, sp=0, se=0;
+        const all = [];
+
+        // agents transactions
+        if(currentReportFilter === 'all' || currentReportFilter === 'agents') {
+            agents.forEach(a => {
+                if(!a.trans) return;
+                Object.values(a.trans).forEach(x => {
+                    all.push({
+                        name: a.name,
+                        type: (x.type==='debt' ? 'دين' : 'تسديد'),
+                        amt: parseFloat(x.amt||0),
+                        date: x.date || '',
+                        by: x.by || (x.meta && x.meta.by) || 'system/import',
+                        voucherNo: x.voucherNo || ''
+                    });
+                });
+            });
+        }
+
+        // expenses
+        if(currentReportFilter === 'all' || currentReportFilter === 'expenses') {
+            expenses.forEach(e => all.push({
+                name: e.type || 'مصروف',
+                type: 'مصروف',
+                amt: parseFloat(e.amount||0),
+                date: e.date || '',
+                by: e.by || 'system/import',
+                voucherNo: e.voucherNo || ''
+            }));
+        }
+
+        const filtered = all.filter(x => {
+            const d = (x.date||'').split('T')[0];
+            return (!f || d >= f) && (!t || d <= t);
+        }).sort((a,b) => new Date(a.date) - new Date(b.date));
+
+        // totals
+        filtered.forEach(x => {
+            if(x.type === 'دين') sd += x.amt;
+            else if(x.type === 'تسديد') sp += x.amt;
+            else se += x.amt;
         });
 
         document.getElementById('repD').innerText = fmt(sd);
         document.getElementById('repP').innerText = fmt(sp);
         document.getElementById('repE').innerText = fmt(se);
-        document.getElementById('repN').innerText = fmt(sd - sp);
-    }
+        // الصافي = (التسديد - المصاريف)
+        document.getElementById('repN').innerText = fmt(sp - se);
+
+        // cache + first page render
+        window.__reportCache.data = filtered;
+        window.__reportCache.page = 1;
+        __renderReportPage();
+    };
+
 
     window.downloadReport = () => {
         const e=document.getElementById('reportContentArea');
@@ -3344,56 +3477,80 @@ setTimeout(addPDFButtons, 1000);
   const old = window.runReport;
   window.runReport = function(){
     try{
-      const f = document.getElementById('repFrom')?.value || '';
-      const t = document.getElementById('repTo')?.value || '';
-      const list = document.getElementById('repResult'); if(!list) return old();
-      list.innerHTML = '';
-      let sd=0, sp=0, se=0;
-      let all = [];
+        const f = document.getElementById('repFrom')?.value || '';
+        const t = document.getElementById('repTo')?.value || '';
 
-      if(currentReportFilter === 'all' || currentReportFilter === 'agents'){
-        (agents||[]).forEach(a => {
-          if(a.trans) Object.values(a.trans).forEach(x => all.push({name:a.name, type:x.type==='debt'?'دين':'تسديد', amt:x.amt, date:x.date}));
+        let sd=0, sp=0, se=0;
+        let all = [];
+
+        // agents (debts/payments)
+        if(currentReportFilter === 'all' || currentReportFilter === 'agents'){
+            (agents||[]).forEach(a => {
+                if(!a || !a.trans) return;
+                Object.values(a.trans).forEach(x => {
+                    if(!x) return;
+                    all.push({
+                        kind: 'agent',
+                        agentId: a.id,
+                        name: a.name,
+                        type: x.type==='debt' ? 'دين' : 'تسديد',
+                        amt: Number(x.amt||0),
+                        date: x.date || '',
+                        note: x.note || '',
+                        voucherNo: x.voucherNo || '',
+                        by: x.by || 'غير معروف'
+                    });
+                });
+            });
+        }
+
+        // expenses
+        if(currentReportFilter === 'all' || currentReportFilter === 'expenses'){
+            (expenses||[]).forEach(e => {
+                if(!e) return;
+                all.push({
+                    kind: 'expense',
+                    name: e.type || 'مصروف',
+                    type: 'مصروف',
+                    amt: Number(e.amount||0),
+                    date: e.date || '',
+                    note: e.note || '',
+                    voucherNo: e.voucherNo || '',
+                    by: e.by || 'غير معروف'
+                });
+            });
+        }
+
+        const filtered = all
+            .filter(x => {
+                const d = (x.date||'').split('T')[0];
+                return (!f || d >= f) && (!t || d <= t);
+            })
+            .sort((a,b) => new Date(b.date) - new Date(a.date)); // newest first
+
+        // totals
+        filtered.forEach(x => {
+            if(x.type === 'دين') sd += Number(x.amt||0);
+            else if(x.type === 'تسديد') sp += Number(x.amt||0);
+            else se += Number(x.amt||0);
         });
-      }
-      if(currentReportFilter === 'all' || currentReportFilter === 'expenses'){
-        (expenses||[]).forEach(e => all.push({name:e.type, type:'مصروف', amt:e.amount, date:e.date, note:e.note||''}));
-      }
 
-      const filtered = all
-        .filter(x => { const d = (x.date||'').split('T')[0]; return (!f || d >= f) && (!t || d <= t); })
-        .sort((a,b) => new Date(b.date) - new Date(a.date)); // newest first
+        // cache + render fast
+        window.__reportCache.data = filtered;
+        window.__reportCache.page = 1;
+        __renderReportPage();
 
-      filtered.forEach((x, idx) => {
-        if(x.type === 'دين') sd += Number(x.amt||0);
-        else if(x.type === 'تسديد') sp += Number(x.amt||0);
-        else se += Number(x.amt||0);
+        // totals UI
+        const elD = document.getElementById('repD'); if(elD) elD.innerText = fmt(sd);
+        const elP = document.getElementById('repP'); if(elP) elP.innerText = fmt(sp);
+        const elE = document.getElementById('repE'); if(elE) elE.innerText = fmt(se);
+        const elN = document.getElementById('repN'); if(elN) elN.innerText = fmt(sp - sd - se);
 
-        let color = x.type==='دين'?'var(--red)':(x.type==='تسديد'?'var(--green)':'var(--orange)');
-        const dt = x.date ? new Date(x.date).toLocaleString('en-GB') : '';
-        list.innerHTML += `
-          <div class="list-item">
-            <div style="display:flex; align-items:center; gap:10px">
-              <span style="background:#e2e8f0; width:25px; height:25px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:bold">${idx+1}</span>
-              <div>
-                <b>${x.name||''}</b> <small style="color:#64748b">(${x.type})</small><br>
-                <small style="color:#94a3b8">${dt}</small>
-              </div>
-            </div>
-            <div style="text-align:left">
-              <b style="color:${color}">${fmt(x.amt||0)}</b>
-            </div>
-          </div>`;
-      });
-
-      document.getElementById('repD').innerText = fmt(sd);
-      document.getElementById('repP').innerText = fmt(sp);
-      document.getElementById('repE').innerText = fmt(se);
-      document.getElementById('repN').innerText = fmt(sd - sp);
     }catch(e){
-      old();
+        console.warn('runReport failed', e);
+        if(typeof old==='function') old();
     }
-  };
+};
 })();
 
 /* ================= Logs: add serial + datetime and keep newest first ================= */
