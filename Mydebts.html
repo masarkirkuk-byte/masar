@@ -845,7 +845,9 @@ function masarFullReplaceAgentsImport(){
 }
 
 function masarTryPromptImportOnce(){
-    try{
+    // تم تعطيل الاستيراد التلقائي حسب طلبك
+    return;
+try{
         if(!currentUser || currentUser.role!=='admin') return;
         const flagKey = 'masar_import_done_' + (MASAR_IMPORT_META.exported_at || 'unknown');
         if(localStorage.getItem(flagKey)) return;
@@ -943,10 +945,7 @@ function masarTryPromptImportOnce(){
 
         // Backup يومي تلقائي (Agents فقط) للأدمن
         tryAutoDailyAgentsBackup();
-
-        // Prompt import once (admin only)
-        try{ masarTryPromptImportOnce(); }catch(e){}
-
+        // (تم إلغاء الاستيراد التلقائي حسب طلبك)
         restoreView();
     }
 
@@ -1277,7 +1276,13 @@ function masarTryPromptImportOnce(){
 
     function saveAgent() {
         const n = document.getElementById('inAgName').value; if(!n) return alert("الاسم مطلوب");
-        const obj = { name: n, phone: document.getElementById('inAgPhone').value, address: document.getElementById('inAgAddr').value, note: document.getElementById('inAgNote').value };
+        let d = (document.getElementById('inExDate') ? document.getElementById('inExDate').value : '');
+        if(!d){
+            const now = new Date();
+            const off = now.getTimezoneOffset();
+            d = new Date(now.getTime()-off*60000).toISOString().slice(0,16);
+        }
+        const obj = { type: t, category: (document.getElementById('inExCat')?document.getElementById('inExCat').value:'أخرى'), amount: a, date: d, note: document.getElementById('inExNote').value, voucherNo: (window.nextVoucher?nextVoucher('MASAR-EX'): '') };
         if(editId) {
             db.ref('agents/' + editId).update(obj).then(() => updateAgentsUI());
             log(`عدل وكيل: ${n}`);
@@ -5100,6 +5105,5 @@ window.downloadAgentsExcel = function () {
 
 </script>
 <!-- ====================== END VIP PACK ====================== -->
-
 
 
