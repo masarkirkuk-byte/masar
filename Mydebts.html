@@ -1294,20 +1294,46 @@ try{
         closeModal();
     }
 
+    
     function saveExp() {
-        const t = document.getElementById('inExType').value;
+        const t = (document.getElementById('inExType').value || '').trim();
         const a = parseFloat((document.getElementById('inExAmt').value||'').replace(/,/g,''));
         if(!t || isNaN(a)) return alert("أكمل نوع المصروف والمبلغ");
-        const obj = { type: t, category: (document.getElementById('inExCat')?document.getElementById('inExCat').value:'أخرى'), amount: a, date: document.getElementById('inExDate').value, note: document.getElementById('inExNote').value, voucherNo: (window.nextVoucher?nextVoucher('MASAR-EX'): '') };
+
+        // تاريخ تلقائي + تحويل لصيغة ISO ثابتة حتى تظهر بالتقارير والسجل
+        const rawDate = (document.getElementById('inExDate') && document.getElementById('inExDate').value) ? document.getElementById('inExDate').value : '';
+        let isoDate = '';
+        try{
+            isoDate = rawDate ? new Date(rawDate).toISOString() : new Date().toISOString();
+        }catch(e){
+            isoDate = new Date().toISOString();
+        }
+
+        const obj = {
+            type: t,
+            category: (document.getElementById('inExCat') ? document.getElementById('inExCat').value : 'أخرى'),
+            amount: a,
+            date: isoDate,
+            note: (document.getElementById('inExNote') ? document.getElementById('inExNote').value : ''),
+            voucherNo: (window.nextVoucher ? nextVoucher('MASAR-EX') : '')
+        };
+
+        // حفظ مع تأكيد نجاح/فشل (حتى ما تضيف وما يطلع شي)
+        const done = () => { try{ updateExpUI(); }catch(e){} closeModal(); };
+        const fail = (err) => { alert("⚠️ لم يتم حفظ المصروف. راجع اتصال Firebase أو Rules.\n" + (err && err.message ? err.message : "")); };
+
         if(editId) {
-            db.ref('expenses/' + editId).update(obj).then(() => updateExpUI());
-            log(`عدل مصروف: ${t}`);
+            db.ref('expenses/' + editId).update(obj).then(() => {
+                try{ log(`عدل مصروف: ${t}`); }catch(e){}
+                done();
+            }).catch(fail);
         } else {
             const id = Date.now();
-            db.ref('expenses/' + id).set({...obj, id: id});
-            log(`أضاف مصروف: ${t} (${fmt(a)})`);
+            db.ref('expenses/' + id).set({...obj, id: id}).then(() => {
+                try{ log(`أضاف مصروف: ${t} (${fmt(a)})`); }catch(e){}
+                done();
+            }).catch(fail);
         }
-        closeModal();
     }
 
     function saveUser() {
