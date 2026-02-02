@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام حسابات المسار</title>
+    <title>نظام المسار نت</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -616,11 +616,11 @@
         <div class="advanced-filter">
             <div class="date-input-group" style="margin-bottom:10px">
                 <label style="font-size:0.8rem; font-weight:bold">من تاريخ:</label>
-                <input type="date" id="repFrom" class="app-input" style="margin:0">
+                <input type="date" id="repFrom" class="app-input" style="margin:0" onchange="runReport()">
             </div>
             <div class="date-input-group" style="margin-bottom:10px">
                 <label style="font-size:0.8rem; font-weight:bold">إلى تاريخ:</label>
-                <input type="date" id="repTo" class="app-input" style="margin:0">
+                <input type="date" id="repTo" class="app-input" style="margin:0" onchange="runReport()">
             </div>
 
             <button onclick="runReport()" class="btn-main" style="background:var(--primary); color:white; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3);">🔍 عرض التقرير</button>
@@ -925,16 +925,23 @@ try{
         db.ref('users/' + u).once('value', s => {
             if(s.exists()) {
                 const d = s.val();
+                d.username = (d.username||u);
+                d.role = ((d.role||'user')+'').trim().toLowerCase();
                 if(d.pass == p) {
                     if(d.blocked) { alert("حساب موقوف"); return; }
                     localStorage.setItem('masar_user', u);
-                    startApp(d);
+                    startApp(d, u);
                 } else alert("كلمة المرور خطأ");
             } else alert("المستخدم غير موجود");
         });
     }
 
-    function startApp(user) {
+    function startApp(user, usernameKey) {
+        user = user || {};
+        // تطبيع الاسم/الدور حتى ما يصير (غير معروف)
+        const uKey = (usernameKey || user.username || localStorage.getItem('masar_user') || '').toString().trim();
+        user.username = uKey || (user.username||'').toString().trim() || 'unknown';
+        user.role = ((user.role||'user').toString().trim().toLowerCase());
         currentUser = user;
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appContent').style.display = 'block';
@@ -1204,7 +1211,7 @@ try{
 
     // ===== Logs UI =====
     window.renderLogsUI = function() {
-        const list = document.getElementById('logsListUI'); list.innerHTML = '';
+        const list = document.getElementById('logsListUI'); if(!list) return; list.innerHTML = '';
         const txt = (document.getElementById('logSearch').value || '').toLowerCase();
         const from = document.getElementById('logFrom').value;
         const to = document.getElementById('logTo').value;
@@ -1587,9 +1594,13 @@ try{
                 const first = new Date(now.getFullYear(), now.getMonth(), 1);
                 if(repFrom && !repFrom.value) repFrom.value = first.toISOString().slice(0,10);
                 if(repTo && !repTo.value) repTo.value = now.toISOString().slice(0,10);
-                const list = document.getElementById('repResult');
-                if(list) list.innerHTML = '';
+                // عرض التقرير مباشرة بدون زر
+                setTimeout(()=>{ try{ runReport(); }catch(e){} }, 80);
             }catch(e){}
+        }
+        if(view === 'logs') {
+            // عرض سجل النشاطات مباشرة
+            setTimeout(()=>{ try{ renderLogsUI(); }catch(e){} }, 50);
         }
     }
 
@@ -2553,7 +2564,7 @@ window.downloadExpensesExcel = function () {
           }catch(e){}
 
           localStorage.setItem('masar_user', u);
-          startApp(d);
+          startApp(d, u);
         });
       }
     }
@@ -2613,6 +2624,9 @@ window.downloadExpensesExcel = function () {
       }
     };
 
+
+    // Alias للتوافق: بعض الأجزاء تستعمل addLog
+    window.addLog = function(text, meta){ try{ window.log(text, meta); }catch(e){} };
     // ---------- daily full backup to cloud (once per day, admin only) ----------
     async function dailyCloudBackup(){
       try{
