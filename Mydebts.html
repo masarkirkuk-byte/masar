@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام المسار نت</title>
+    <title>نظام المسار نت </title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -404,6 +404,23 @@
 }
 </style>
 
+
+<script>
+function __getUserRoleSafe(){
+  try{
+    if(window.currentUser && window.currentUser.role) return String(window.currentUser.role);
+    const r = localStorage.getItem('masar_role');
+    if(r) return String(r);
+  }catch(e){}
+  return '';
+}
+function __isAdminUI(){
+  const r = (__getUserRoleSafe()||'').toLowerCase();
+  const u = ((window.currentUser && (window.currentUser.username||window.currentUser.user)) || localStorage.getItem('masar_user') || '').toLowerCase();
+  return (r==='admin' || u==='admin');
+}
+</script>
+
 </head>
 <body>
 
@@ -545,7 +562,7 @@
         
         
         <div class="controls-row">
-            <button class="btn-main" style="background:var(--orange)" onclick="openModal('expense')">+ مصروف جديد</button>
+            <button class="btn-main" style="background:var(--orange)" onclick="openNewExpense()">+ مصروف جديد</button>
             <button type="button" class="mini-btn" onclick="downloadExpensesExcel()" style="background:#1d4ed8; color:white">📊 Excel</button>
             <button class="mini-btn" onclick="printExpList()" style="background:#111827; color:white">📄 PDF</button>
         </div>
@@ -895,7 +912,13 @@ function renderLogsUI(){
     const toT = toV ? new Date(toV+'T23:59:59').getTime() : null;
 
     const items = (Array.isArray(logs) ? logs.slice() : [])
-      .filter(x=>x && (x.msg || x.text))
+      .filter(x=>x)
+      .map(x=>{
+        const msg = x.msg || x.text || (x.action ? (x.action + ' • ' + (x.path||'')) : '') || '';
+        const by  = x.by  || x.actor || x.user || '';
+        const date = x.date || x.createdAt || x.time || x.ts || x.t || x.at || x.when || '';
+        return { ...x, msg, by, date };
+      })
       .map(x=>{
         const t = x.date || x.createdAt || x.time || x.ts || '';
         let ms = 0;
@@ -907,7 +930,7 @@ function renderLogsUI(){
         if(fromT!==null && (x.__ms||0) < fromT) return false;
         if(toT!==null && (x.__ms||0) > toT) return false;
         if(!q) return true;
-        const blob = ((x.msg||'')+' '+(x.by||'')+' '+JSON.stringify(x.meta||{})).toLowerCase();
+        const blob = ((x.msg||'')+' '+(x.by||'')+' '+(x.role||'')+' '+JSON.stringify(x.meta||x.data||{})).toLowerCase();
         return blob.includes(q);
       });
 
@@ -1077,12 +1100,14 @@ try{
 
         // تحميل البيانات
         db.ref('agents').on('value', s => { agents = s.val() ? Object.values(s.val()) : []; updateDash(); updateAgentsUI(); });
-        db.ref('expenses').on('value', s => { expenses = s.val() ? Object.values(s.val()) : []; updateDash(); updateExpUI(); });
+        db.ref('expenses').on('value', s => { const v=s.val()||{}; expenses = Object.entries(v).map(([id,obj])=>({id, ...(obj||{})})); updateDash(); updateExpUI(); });
 
-        db.ref('logs').on('value', s => { logs = s.val() ? Object.values(s.val()) : []; renderLogsUI(); });
+        db.ref('logs').on('value', s => { const v=s.val()||{}; const remote = Object.entries(v).map(([id,obj])=>({id, ...(obj||{})})); const local = __readLocalLogs().map((x,i)=>({id:(x.lid||('local_'+i)), ...(x||{}), __local:true})); logs = remote.concat(local); renderLogsUI();
+  window.addEventListener('masar_logs_updated', () => { logs = __readLocalLogs(); renderLogsUI(); });
+ }, err => { console.warn('logs read failed', err); try{ logs = __readLocalLogs().map((x,i)=>({id:(x.lid||('local_'+i)), ...(x||{}), __local:true})); renderLogsUI(); }catch(e){} });
 
         if(user.role === 'admin') {
-            db.ref('users').on('value', s => { users = s.val() ? Object.values(s.val()) : []; updateUsersUI(); });
+            db.ref('users').on('value', s => { const v=s.val()||{}; users = Object.entries(v).map(([id,obj])=>({id, ...(obj||{})})); updateUsersUI(); });
         }
 
         // Backup يومي تلقائي (Agents فقط) للأدمن
@@ -1461,6 +1486,7 @@ window.renderExpensesList = function(){
 <label class="form-label">المبلغ</label><input id="inExAmt" class="app-input" oninput="formatNumberInput(this)">
                 <label class="form-label">ملاحظات</label><input id="inExNote" class="app-input">
                 <button class="btn-main" style="background:var(--orange)" onclick="saveExp()">حفظ</button>
+                <button id="btnDelExp" class="btn-main" style="background:#e74c3c; margin-top:5px; display:none" onclick="deleteExp()">حذف</button>
                 <button class="btn-main" style="background:#ccc; margin-top:5px" onclick="closeModal()">إلغاء</button>`;
             setTimeout(() => { let d = new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); document.getElementById('inExDate').value = d.toISOString().slice(0,16); }, 100);
         } else if(type === 'user') {
@@ -1502,48 +1528,65 @@ window.renderExpensesList = function(){
 
 
     
-    function saveExp() {
-        const t = ((document.getElementById('inExCat')?.value)||'').trim() || 'مصروف';
-        const a = parseFloat((document.getElementById('inExAmt').value||'').replace(/,/g,''));
-        if(isNaN(a)) return alert('أكمل المبلغ');
+    function saveExp(){
+  try{
+    const date = (document.getElementById('inExDate')?.value || '').trim() || new Date().toISOString().slice(0,10);
+    const category = (document.getElementById('inExCat')?.value || '').trim() || 'مصروف يومي';
+    const notes = (document.getElementById('inExNotes')?.value || '').trim();
+    const rawAmt = (document.getElementById('inExAmt')?.value || '');
+    const amount = parseInt(String(rawAmt).replace(/[^0-9]/g,''), 10) || 0;
 
-        // تاريخ تلقائي + تحويل لصيغة ISO ثابتة حتى تظهر بالتقارير والسجل
-        const rawDate = (document.getElementById('inExDate') && document.getElementById('inExDate').value) ? document.getElementById('inExDate').value : '';
-        let isoDate = '';
-        try{
-            isoDate = rawDate ? new Date(rawDate).toISOString() : new Date().toISOString();
-        }catch(e){
-            isoDate = new Date().toISOString();
-        }
+    const user = window.currentUser || window.__currentUser || {};
+    const actor = user.username || user.user || user.name || 'admin';
 
-        const obj = {
-            type: t,
-            category: (document.getElementById('inExCat') ? document.getElementById('inExCat').value : 'أخرى'),
-            amount: a,
-            date: isoDate,
-            note: (document.getElementById('inExNote') ? document.getElementById('inExNote').value : ''),
-            voucherNo: (window.nextVoucher ? nextVoucher('MASAR-EX') : ''),
-            by: (currentUser && currentUser.username) ? currentUser.username : 'system',
-            createdAt: new Date().toISOString()
-        };
-
-        // حفظ مع تأكيد نجاح/فشل (حتى ما تضيف وما يطلع شي)
-        const done = () => { try{ updateExpUI(); }catch(e){} closeModal(); };
-        const fail = (err) => { alert("⚠️ لم يتم حفظ المصروف. راجع اتصال Firebase أو Rules.\n" + (err && err.message ? err.message : "")); };
-
-        if(editId) {
-            db.ref('expenses/' + editId).update(obj).then(() => {
-                try{ log(`عدل مصروف: ${t}`, {action:'update_expense', expenseId: editId, type:t, amount:a}); }catch(e){}
-                done();
-            }).catch(fail);
-        } else {
-            const id = Date.now();
-            db.ref('expenses/' + id).set({...obj, id: id}).then(() => {
-                try{ log(`أضاف مصروف: ${t} (${fmt(a)})`, {action:'create_expense', expenseId:id, type:t, amount:a}); }catch(e){}
-                done();
-            }).catch(fail);
-        }
+    const payload = {
+      lid: ('l'+Date.now()+'_'+Math.random().toString(16).slice(2)), date, category, amount, notes, updatedAt: Date.now(), updatedBy: actor };
+    if(!window.editId){
+      payload.createdAt = Date.now();
+      payload.createdBy = actor;
     }
+
+    const ref = window.editId ? db.ref('expenses/' + window.editId) : db.ref('expenses').push();
+    ref.set(payload).then(()=>{
+      try{ log(((window.editId)?'تعديل مصروف: ':'إضافة مصروف: ')+payload.category+' - '+fmt(payload.amount), {type:'expense', action:(window.editId?'update':'create'), category: payload.category, amount: payload.amount, date: payload.date, notes: payload.notes}); }catch(e){}
+
+      closeModal();
+      window.editId=null;
+      showToast('تم الحفظ ✅');
+    }).catch((e)=>{
+      alert('خطأ بالحفظ: ' + (e?.message||e));
+    });
+  }catch(e){
+    alert('خطأ: ' + (e?.message||e));
+  }
+}
+
+function deleteExp(){
+  try{
+    const id = (typeof editId!=='undefined' && editId) ? editId : (window.editId||null);
+    if(!id){ toast('⚠️ اختر المصروف أولاً'); return; }
+    if(!confirm('تأكيد حذف المصروف؟')) return;
+
+    db.ref('expenses/'+id).remove()
+      .then(()=>{
+        try{ log('حذف مصروف: رقم '+id, {type:'expense', action:'delete', expenseId:id}); }catch(e){}
+        if(typeof editId!=='undefined') editId=null;
+        window.editId=null;
+        closeModal('expense');
+      })
+      .catch((e)=>{ console.error(e); toast('⚠️ تعذر الحذف'); });
+  }catch(e){
+    console.error(e);
+    toast('⚠️ تعذر الحذف');
+  }
+}
+
+function openNewExpense(){
+  editId = null;
+  openModal('expense');
+  setTimeout(()=>{ const delBtn=document.getElementById('btnDelExp'); if(delBtn) delBtn.style.display='none'; },0);
+}
+
 
     function saveUser() {
         if(!canManageUsers()) return alert("عذراً، الأدمن فقط");
@@ -1577,17 +1620,18 @@ window.renderExpensesList = function(){
     }
 
     function editExp(id) {
-        const e = expenses.find(x => x.id == id);
-        editId = id;
-        openModal('expense');
-        setTimeout(() => {
-document.getElementById('inExAmt').value = fmt(e.amount);
-            document.getElementById('inExNote').value = e.note||'';
-            try{ if(document.getElementById('inExCat')) document.getElementById('inExCat').value = e.category || 'أخرى'; }catch(_e){}
-            let d = new Date(e.date); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
-            document.getElementById('inExDate').value = d.toISOString().slice(0,16);
-        }, 100);
-    }
+  const e = expenses.find(x => x.id == id);
+  if(!e) return;
+  editId = id;
+  openModal('expense');
+  setTimeout(() => {
+    const delBtn=document.getElementById('btnDelExp'); if(delBtn) delBtn.style.display='inline-block';
+    const amtEl=document.getElementById('inExAmt'); if(amtEl) amtEl.value = fmt(e.amount);
+    const noteEl=document.getElementById('inExNotes'); if(noteEl) noteEl.value = e.notes || e.note || '';
+    const dateEl=document.getElementById('inExDate'); if(dateEl) dateEl.value = e.date || '';
+    const catEl=document.getElementById('inExCat'); if(catEl) catEl.value = e.category || 'مصروف يومي';
+  }, 0);
+}
 
     window.editUser = function(username) {
         if(!canManageUsers()) return alert("عذراً، الأدمن فقط");
@@ -1721,20 +1765,45 @@ document.getElementById('inExAmt').value = fmt(e.amount);
         }, 200);
     }
 
-    function log(msg, meta){
+    
+  // Local logs fallback (in case Firebase rules block /logs writes)
+  const __LOCAL_LOGS_KEY = 'masar_local_logs_v1';
+  function __readLocalLogs(){
+    try{ return JSON.parse(localStorage.getItem(__LOCAL_LOGS_KEY)||'[]')||[]; }catch(e){ return []; }
+  }
+  function __pushLocalLog(item){
     try{
-        const payload = {
-            msg: String(msg||''),
-            by: __getActor(),
-            role: __getRole(),
-            date: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            meta: meta || {}
-        };
-        // append-only
-        db.ref('logs').push(payload);
+      const arr = __readLocalLogs();
+      arr.unshift(item);
+      if(arr.length>500) arr.length=500;
+      localStorage.setItem(__LOCAL_LOGS_KEY, JSON.stringify(arr));
+    }catch(e){}
+  }
+
+function log(msg, meta){
+    const payload = {
+        msg: String(msg||''),
+        by: __getActor(),
+        role: __getRole(),
+        date: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        meta: meta || {}
+    };
+    // Always keep a local copy (works even if Firebase rules block writes)
+    try{ __pushLocalLog(payload);
+    try{ window.dispatchEvent(new Event('masar_logs_updated')); }catch(_e){}
+}catch(e){}
+
+    // Best-effort remote write (never block UI)
+    try{
+        if(window.db && db.ref){
+            const ref = db.ref('logs').push(payload);
+            if(ref && typeof ref.catch === 'function'){
+                ref.catch(function(err){ console.warn('log remote failed', err); });
+            }
+        }
     }catch(e){
-        console.warn('log failed', e);
+        console.warn('log remote failed', e);
     }
 }
 
@@ -1788,13 +1857,17 @@ document.getElementById('inExAmt').value = fmt(e.amount);
         } else nav('main');
     }
 
-    function fmt(n) { return Number(n).toLocaleString('en-US'); }
-    window.fmtInput = (el) => {
-        let v = (el.value||'').replace(/[^0-9]/g, '');
-        if(v) el.value = parseInt(v).toLocaleString('en-US');
-    }
+    function fmt(n){
+  try{const x=Math.round(Number(n)||0);return String(x).replace(/\B(?=(\d{3})+(?!\d))/g,'.');}catch(e){return n}
+}
+window.fmtInput=(el)=>{
+  let v=(el.value||'').replace(/[^0-9]/g,'');
+  if(!v){el.value=''; return;}
+  el.value=fmt(parseInt(v,10));
+};
+window.formatNumberInput = window.fmtInput;
 
-    // ===== Printing =====
+// ===== Printing =====
     window.downloadAgentsList = () => {
         const t = document.getElementById('agents-list-body'); t.innerHTML = '';
 
@@ -2615,31 +2688,13 @@ ${lastTypeIcon} النوع: ${lastTypeTxt}
 </script>
 
 
-<script>
-(function(){
-  function sync(){
-    try{
-      if(typeof agents!=='undefined') window.agents = agents;
-      if(typeof expenses!=='undefined') window.expenses = expenses;
-      if(typeof logs!=='undefined') window.logs = logs;
-      if(typeof users!=='undefined') window.users = users;
-    }catch(e){}
-  }
-  sync();
-  setInterval(sync, 700);
-})();
-</script>
-
-
-
-
 <!-- WhatsApp Desktop FIX removed as requested -->
 
 
 
 <div style="text-align:center;margin-top:40px;padding:15px;
 font-size:14px;color:#555;">
-جميع الحقوق المحفوظة لشركة المسار 2026 ©<br>ORHAN BAKR
+جميع الحقوق المحفوظة لشركة المسار 2026 ©<br>اORHAN BAKR
 </div>
 
 
@@ -2941,7 +2996,32 @@ window.downloadExpensesExcel = function () {
     }
 
     // override log() if exists; otherwise create one
-    const oldLog = window.log;
+    
+  // Robust actor resolver (admin/employee) for activity logs
+  function __getActor(){
+    try{
+      // 1) currentUser object used across the app
+      if(window.currentUser){
+        const u = window.currentUser;
+        const name = (u.name||u.username||u.user||u.email||'').toString().trim();
+        const role = (u.role||u.type||'').toString().trim();
+        if(name) return role ? (name + ' (' + role + ')') : name;
+      }
+      // 2) legacy session storage keys
+      const ss = window.sessionStorage || null;
+      const ls = window.localStorage || null;
+      const get = (k)=>{ try{ return (ss&&ss.getItem(k)) || (ls&&ls.getItem(k)) || ''; }catch(e){ return ''; } };
+      const name = (get('masar_user')||get('username')||get('user')||get('adminUser')||'').toString().trim();
+      const role = (get('masar_role')||get('role')||get('userRole')||'').toString().trim();
+      if(name) return role ? (name + ' (' + role + ')') : name;
+      // 3) fallback: show browser profile label if present
+      return 'غير معروف';
+    }catch(e){
+      return 'غير معروف';
+    }
+  }
+
+const oldLog = window.log;
     window.log = function(text, meta){
       try{
         if(!window.db) return;
@@ -2958,7 +3038,114 @@ window.downloadExpensesExcel = function () {
       }
     };
 
-    // ---------- daily full backup to cloud (once per day, admin only) ----------
+    
+    // ---------- AUDIT PATCH: auto-log any DB write with actor ----------
+    (function(){
+      try{
+        if(window.__MASAR_AUDIT_PATCHED__) return;
+        window.__MASAR_AUDIT_PATCHED__ = true;
+        if(!window.db || !window.db.ref) return;
+
+        function __auditActor(){
+          try{
+            const u = JSON.parse(localStorage.getItem('masar_current_user')||'null');
+            if(u && u.username){
+              return {by:String(u.username), role:(u.role?String(u.role):'')};
+            }
+          }catch(e){}
+          return {by:'unknown', role:''};
+        }
+
+        function __audit(action, path, payload){
+          try{
+            if(!path) return;
+            if(String(path).startsWith('logs')) return; // avoid recursion
+            const a = __auditActor();
+            const pretty = (function(){
+              const p = String(path);
+              if(p.startsWith('agents')) return 'الوكلاء';
+              if(p.startsWith('expenses')) return 'المصاريف';
+              if(p.startsWith('payments')) return 'التسديدات';
+              if(p.startsWith('debts')) return 'الديون';
+              if(p.startsWith('users')) return 'المستخدمين';
+              if(p.startsWith('invoices')) return 'الفواتير';
+              return p;
+            })();
+            const msg = `🔎 ${pretty} — ${String(action).toUpperCase()}`;
+            const entry = {
+              msg: msg,
+              action: String(action),
+              path: String(path),
+              by: a.by,
+              role: a.role,
+              date: new Date().toISOString(),
+              ts: Date.now(),
+              payload: (payload===undefined || payload===null) ? null : payload
+            };
+            db.ref('logs').push(entry);
+          }catch(e){}
+        }
+
+        function __wrapRef(ref, path){
+          try{
+            if(ref.__masarWrapped) return ref;
+            Object.defineProperty(ref, '__masarWrapped', {value:true, enumerable:false});
+            const oSet = ref.set && ref.set.bind(ref);
+            const oUpdate = ref.update && ref.update.bind(ref);
+            const oRemove = ref.remove && ref.remove.bind(ref);
+            const oPush = ref.push && ref.push.bind(ref);
+
+            if(oSet){
+              ref.set = function(v, cb){
+                __audit('set', path, v);
+                return oSet(v, cb);
+              };
+            }
+            if(oUpdate){
+              ref.update = function(v, cb){
+                __audit('update', path, v);
+                return oUpdate(v, cb);
+              };
+            }
+            if(oRemove){
+              ref.remove = function(cb){
+                __audit('remove', path, null);
+                return oRemove(cb);
+              };
+            }
+            if(oPush){
+              ref.push = function(v, cb){
+                if(arguments.length===0){
+                  const newRef = oPush();
+                  __audit('push', path, {key:newRef && newRef.key});
+                  return __wrapRef(newRef, path + '/' + (newRef && newRef.key ? newRef.key : ''));
+                }
+                if(typeof v === 'function'){
+                  const newRef = oPush(v);
+                  __audit('push', path, {key:newRef && newRef.key});
+                  return __wrapRef(newRef, path + '/' + (newRef && newRef.key ? newRef.key : ''));
+                }
+                const newRef = oPush(v, cb);
+                __audit('push', path, v);
+                return __wrapRef(newRef, path + '/' + (newRef && newRef.key ? newRef.key : ''));
+              };
+            }
+          }catch(e){}
+          return ref;
+        }
+
+        const __origRef = db.ref.bind(db);
+        db.ref = function(path){
+          const r = __origRef(path);
+          return __wrapRef(r, String(path||''));
+        };
+
+        window.__MASAR_AUDIT__ = __audit;
+      }catch(e){}
+    })();
+
+
+// ---------- daily full backup to cloud (once per day, admin only) ----------
     async function dailyCloudBackup(){
       try{
         if(!window.currentUser || window.currentUser.role!=='admin') return;
@@ -3901,6 +4088,15 @@ function setExpFilter(filter, btn){
 </script>
 <!-- ====================== END ACTIVITY LOGS PATCH ====================== -->
 
+
+<script>
+function openUsersFromAdmin(){
+  try{
+    if(!__isAdminUI()){ alert('هذه الصفحة للأدمن فقط'); return; }
+    showView('usersView');
+  }catch(e){}
+}
+</script>
 </body>
 </html>
 
@@ -4604,7 +4800,7 @@ setTimeout(addPDFButtons, 1000);
     });
   }
   setTimeout(upgradeBackButtons, 600);
-  setInterval(upgradeBackButtons, 2500); // keep it strong even after re-render
+  setTimeout(upgradeBackButtons, 1200); // keep it strong even after re-render
 })();
 
 /* --------- Report search (text) inside reports view + filter results --------- */
@@ -4631,7 +4827,7 @@ setTimeout(addPDFButtons, 1000);
   }
 
   setTimeout(ensureReportSearchUI, 1200);
-  setInterval(ensureReportSearchUI, 4000);
+  setTimeout(ensureReportSearchUI, 1400);
 
   // Patch runReport to apply text filtering after it renders
   if(typeof window.runReport === "function" && !window.__repSearchPatched){
@@ -4734,7 +4930,7 @@ setTimeout(addPDFButtons, 1000);
     });
   }
   setTimeout(upgradeBackButtons, 600);
-  setInterval(upgradeBackButtons, 2500);
+  setTimeout(upgradeBackButtons, 1200);
 })();
 
 /* ============ Clickable time everywhere: show full info (ISO + GB) ============ */
@@ -5751,7 +5947,7 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
       }
     }catch(e){}
   }
-  setInterval(applyRolePermissionsUI, 1200);
+  setTimeout(applyRolePermissionsUI, 900);
 
   // ---------- Patch saveExp ----------
   if(typeof window.saveExp === "function" && !window.__vipSaveExpReceipt){
@@ -6340,7 +6536,5 @@ window.downloadAgentsExcel = function () {
 
 </script>
 <!-- ====================== END VIP PACK ====================== -->
-
-
 
 
