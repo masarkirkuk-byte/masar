@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام المسار نت</title>
+    <title>نظام المسار نت - V64 (Dashboard + Reports PDF + Agents Backup + PWA)</title>
 
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -14,12 +14,13 @@
 (function(){
   try{
     window.nextVoucher = function(prefix){
-      prefix = prefix || 'MASAR';
-      const key = 'masar_voucher_seq';
-      const seq = (parseInt(localStorage.getItem(key)||'0',10) || 0) + 1;
+      // رقم تسلسل فواتير/سندات موحد (INV-000001)
+      // يشتغل للديون + التسديد + المصاريف
+      const key = 'masar_invoice_seq';
+      let seq = parseInt(localStorage.getItem(key)||'0',10) || 0;
+      seq += 1;
       localStorage.setItem(key, String(seq));
-      const y = new Date().getFullYear();
-      return `${prefix}-${y}-${String(seq).padStart(6,'0')}`;
+      return `INV-${String(seq).padStart(6,'0')}`;
     };
 
     window.safeNum = function(v){
@@ -383,6 +384,26 @@
 #agentsListUI .item-details p{margin:0; line-height:1.2; white-space:normal}
 </style>
 
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+/* --- Backup panel compact UI --- */
+.backup-panel{margin-top:14px;padding:12px;border:1px solid #e5e7eb;border-radius:14px;background:#fff}
+.backup-title{font-weight:900;color:#0f172a;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.backup-grid{display:flex;flex-wrap:wrap;gap:8px}
+.backup-btn{border:none;border-radius:12px;padding:9px 12px;font-weight:900;cursor:pointer;font-size:.92rem;line-height:1;min-height:42px;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+.backup-btn.full{flex:1 1 220px}
+.backup-btn.small{flex:0 0 auto}
+.backup-btn.green{background:#16a34a;color:#fff}
+.backup-btn.red{background:#b91c1c;color:#fff}
+.backup-btn.purple{background:#7c3aed;color:#fff}
+.backup-btn.gray{background:#0f172a;color:#fff}
+.backup-btn:hover{filter:brightness(.97)}
+@media (max-width:520px){
+  .backup-btn{flex:1 1 100%}
+}
+</style>
+
 </head>
 <body>
 
@@ -481,14 +502,17 @@
             </div>
         </div>
 
-        <div style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:10px">
-            <button onclick="backup()" style="background:#475569; color:white; border:none; padding:12px; border-radius:10px; font-weight:bold; cursor:pointer">💾 حفظ نسخة (وكلاء فقط)</button>
-            <button onclick="document.getElementById('restoreFile').click()" style="background:#0f172a; color:white; border:none; padding:12px; border-radius:10px; font-weight:bold; cursor:pointer">📤 استرجاع بيانات (وكلاء فقط)</button>
-            <input type="file" id="restoreFile" style="display:none" onchange="restoreBackup(this)">
-
-            <button onclick="masarFullReplaceAgentsImport()" style="grid-column:1 / -1; background:#1d4ed8; color:white; border:none; padding:12px; border-radius:10px; font-weight:bold; cursor:pointer">⬇️ استيراد الوكلاء من ملفاتك (استبدال كامل)</button>
-
-        </div>
+        
+<div class="backup-panel" data-admin-only="1" style="display:none">
+  <div class="backup-title">🗄️ النسخ الاحتياطية</div>
+  <div class="backup-grid">
+    <button class="backup-btn green full" onclick="backupAll()">💾 حفظ نسخة احتياطية (كل النظام)</button>
+    <button class="backup-btn red full" onclick="document.getElementById('restoreAllFile').click()">♻️ استرجاع نسخة احتياطية (كل النظام)</button>
+    <button class="backup-btn purple full" onclick="saveAutoBackupNow()">⏱️ حفظ نسخة احتياطية تلقائية</button>
+    <input type="file" id="restoreAllFile" style="display:none" accept="application/json" onchange="restoreAllBackup(this)">
+  </div>
+</div>
+</div>
     </div>
 
     <!-- AGENTS VIEW -->
@@ -810,7 +834,17 @@
     // صلاحيات (Roles)
     function isAdmin(){ return !!(currentUser && ['admin','manager','agents_admin'].includes(__roleNorm(currentUser.role))); }
     function canManageAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin')); }
-    function canDeleteAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin' || currentUser.role==='manager')); }
+    
+    // إظهار/إخفاء عناصر خاصة بالأدمن
+    function applyAdminOnlyVisibility(){
+        try{
+            const ok = isAdmin();
+            document.querySelectorAll('[data-admin-only="1"]').forEach(el=>{
+                el.style.display = ok ? '' : 'none';
+            });
+        }catch(e){ console.error(e); }
+    }
+function canDeleteAgents(){ return !!(currentUser && (currentUser.role==='admin' || currentUser.role==='agents_admin' || currentUser.role==='manager')); }
     function __roleNorm(r){return String(r||'').trim().toLowerCase();}
     function canManageUsers(){ return !!(currentUser && __roleNorm(currentUser.role)==='admin'); }
 
@@ -1032,7 +1066,9 @@ try{
         document.getElementById('appContent').style.display = 'block';
         document.getElementById('connText').innerText = `متصل (${user.username})`;
 
-        // إظهار زر الحسابات فقط للأدمن (بدون فراغ لأنه wide-btn)
+        
+        applyAdminOnlyVisibility();
+// إظهار زر الحسابات فقط للأدمن (بدون فراغ لأنه wide-btn)
         if(user.role === 'admin') {
             document.getElementById('btnUsers').style.display = 'flex';
         } else {
@@ -1242,7 +1278,9 @@ try{
     }
 
     // ===== Expenses UI =====
-    window.renderExpensesList = function() {
+    var currentExpFilter = 'all';
+
+window.renderExpensesList = function(){
         const list = document.getElementById('expensesListUI'); list.innerHTML = '';
         const txt = document.getElementById('expSearchText').value || '';
         const from = document.getElementById('expFrom').value;
@@ -1250,7 +1288,31 @@ try{
         let total = 0;
 
         let res = expenses;
-        if(currentExpFilter !== "all"){ res = res.filter(e => (e.category||"") === currentExpFilter); }
+        function __normExpCat(v){
+        v = (v||'').toString().trim();
+        if(!v) return '';
+        // unify Arabic variants
+        v = v.replace(/إيجارات/g,'ايجارات').replace(/إيجار/g,'ايجارات').replace(/ايجار/g,'ايجارات');
+        v = v.replace(/مصروف يومي/g,'يومي');
+        // classify by keywords (handles when category is missing and stored in type)
+        const vv = v.toLowerCase();
+        if(vv.includes('راتب') || vv.includes('رواتب')) return 'رواتب';
+        if(vv.includes('ايجار') || vv.includes('ايجارات') || vv.includes('إيجار') || vv.includes('إيجارات')) return 'ايجارات';
+        if(vv.includes('يومي') || vv.includes('مصروف يومي')) return 'يومي';
+        if(vv.includes('اخرى') || vv.includes('أخرى')) return 'أخرى';
+        // keep cleaned
+        return v;
+      }
+      const __wanted = __normExpCat(currentExpFilter);
+      if(__wanted !== "all"){
+        res = res.filter(e => {
+          const c1 = __normExpCat(e.category);
+          const c2 = __normExpCat(e.cat);
+          const c3 = __normExpCat(e.type);
+          const c4 = __normExpCat(e.note);
+          return (c1 === __wanted) || (c2 === __wanted) || (c3 === __wanted) || (c4 === __wanted);
+        });
+      }
         if(txt) res = res.filter(e => (e.type||'').includes(txt) || (e.note && e.note.includes(txt)));
         if(from) res = res.filter(e => (e.date||'').split('T')[0] >= from);
         if(to) res = res.filter(e => (e.date||'').split('T')[0] <= to);
@@ -1301,23 +1363,55 @@ try{
         const from = document.getElementById('logFrom').value;
         const to = document.getElementById('logTo').value;
 
+        const getText = (l) => String(l.text || l.msg || l.message || '').trim();
+        const getActor = (l) => String(l.by || l.actor || l.user || l.username || 'غير معروف').trim();
+        const getRole = (l) => String(l.role || l.userRole || '').trim();
+
         let res = logs.filter(l => {
-            const d = (l.date||'').split('T')[0];
-            const mText = (l.text||'').toLowerCase().includes(txt);
+            const d = String(l.date || l.createdAt || '').split('T')[0];
+            const t = getText(l).toLowerCase();
+            const a = getActor(l).toLowerCase();
+            const mText = !txt || t.includes(txt) || a.includes(txt);
             const mFrom = !from || d >= from;
             const mTo = !to || d <= to;
             return mText && mFrom && mTo;
         });
 
-        if(res.length === 0) { list.innerHTML = '<div style="text-align:center; padding:20px; color:gray">لا توجد نتائج</div>'; return; }
+        if(res.length === 0) {
+            list.innerHTML = '<div style="text-align:center; padding:20px; color:gray">لا توجد نتائج</div>';
+            return;
+        }
 
-        res.sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 100).forEach(l => {
+        res.sort((a,b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0))
+           .slice(0, 200)
+           .forEach(l => {
+            const text = getText(l) || '(بدون وصف)';
+            const actor = getActor(l);
+            const role = getRole(l);
+            const when = new Date(l.date || l.createdAt || Date.now());
+
             let icon = '🔔';
-            if((l.text||'').includes('مصروف')) icon = '💸';
-            else if((l.text||'').includes('دين')) icon = '📉';
-            else if((l.text||'').includes('تسديد')) icon = '💵';
+            const t = text;
+            if(t.includes('مصروف')) icon = '💸';
+            else if(t.includes('دين')) icon = '📉';
+            else if(t.includes('تسديد')) icon = '💵';
+            else if(t.includes('وكيل')) icon = '👤';
+            else if(t.includes('حذف')) icon = '🗑️';
+            else if(t.includes('إضافة') || t.includes('اضاف') || t.includes('أضاف')) icon = '➕';
+            else if(t.includes('تعديل') || t.includes('عدل')) icon = '✏️';
 
-            list.innerHTML += `<div class="log-row"><div class="log-icon">${icon}</div><div class="log-content"><div class="log-text">${l.text}</div><div class="log-date">${new Date(l.date).toLocaleString('en-GB')}</div></div></div>`;
+            const roleLabel = role ? ` • ${role}` : '';
+            list.innerHTML += `
+              <div class="log-row">
+                <div class="log-icon">${icon}</div>
+                <div class="log-content">
+                  <div class="log-text">${text}</div>
+                  <div class="log-date">
+                    <span>بواسطة: <b>${actor}</b>${roleLabel}</span>
+                    <span style="margin-inline-start:10px;">${when.toLocaleString('en-GB')}</span>
+                  </div>
+                </div>
+              </div>`;
         });
     }
 
@@ -1354,8 +1448,7 @@ try{
         } else if(type === 'expense') {
             b.innerHTML = `<h3 style="text-align:center">مصروف جديد</h3>
                 <label class="form-label">التاريخ</label><input type="datetime-local" id="inExDate" class="app-input">
-                <label class="form-label">نوع الصرف</label><input id="inExType" class="app-input" placeholder="مثال: رواتب / ايجارات / يومي">
-                <label class="form-label">تصنيف</label>
+<label class="form-label">تصنيف</label>
 
 
 <select id="inExCat" class="app-input">
@@ -1410,9 +1503,9 @@ try{
 
     
     function saveExp() {
-        const t = (document.getElementById('inExType').value || '').trim();
+        const t = ((document.getElementById('inExCat')?.value)||'').trim() || 'مصروف';
         const a = parseFloat((document.getElementById('inExAmt').value||'').replace(/,/g,''));
-        if(!t || isNaN(a)) return alert("أكمل نوع المصروف والمبلغ");
+        if(isNaN(a)) return alert('أكمل المبلغ');
 
         // تاريخ تلقائي + تحويل لصيغة ISO ثابتة حتى تظهر بالتقارير والسجل
         const rawDate = (document.getElementById('inExDate') && document.getElementById('inExDate').value) ? document.getElementById('inExDate').value : '';
@@ -1488,8 +1581,7 @@ try{
         editId = id;
         openModal('expense');
         setTimeout(() => {
-            document.getElementById('inExType').value = e.type;
-            document.getElementById('inExAmt').value = fmt(e.amount);
+document.getElementById('inExAmt').value = fmt(e.amount);
             document.getElementById('inExNote').value = e.note||'';
             try{ if(document.getElementById('inExCat')) document.getElementById('inExCat').value = e.category || 'أخرى'; }catch(_e){}
             let d = new Date(e.date); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
@@ -1837,7 +1929,7 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
             out.push(`<div class="list-item">
                 <div>
                   <b>${x.name}</b> <small>(${x.type})</small><br>
-                  <small style="color:#555">🧑‍💼 ${x.by || 'غير معروف'} • 🧾 ${x.voucherNo || '-'}</small>
+                  <small style="color:#555">🧑‍💼 ${(x.by||x.createdBy||x.addedBy||x.user||x.username||'غير معروف')} • 🧾 ${x.voucherNo || '-'}</small>
                 </div>
                 <div style="text-align:left">
                     <b style="color:${color}">${fmt(x.amt)}</b><br>
@@ -1960,6 +2052,169 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
         };
         reader.readAsText(file);
     }
+    // ===== Full Backup/Restore (Everything) =====
+    window.backupAll = () => {
+        const paths = ['agents','expenses','logs','settings','users'];
+        const reads = paths.map(p => new Promise((resolve) => {
+            db.ref(p).once('value', s => resolve([p, s.val() || {}]), _ => resolve([p, {}]));
+        }));
+        Promise.all(reads).then(pairs => {
+            const dbData = Object.fromEntries(pairs);
+
+            // LocalStorage (important app state)
+            const lsKeys = ['masar_user','masar_id','masar_settings','masar_view','masar_debt_limit'];
+            const lsData = {};
+            try{
+                lsKeys.forEach(k => { const v = localStorage.getItem(k); if(v !== null) lsData[k] = v; });
+            }catch(e){}
+
+            const pack = {
+                meta: {
+                    schema: 1,
+                    app: 'masar',
+                    type: 'full-backup',
+                    exported_at: new Date().toISOString()
+                },
+                data: dbData,
+                localStorage: lsData
+            };
+
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(pack)], {type:'application/json'}));
+            a.download = `MASAR_FULL_BACKUP_${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+        });
+    };
+
+    window.restoreAllBackup = (el) => {
+        if(!confirm("⚠️ تنبيه قوي: سيتم استبدال (كل) بيانات النظام: الوكلاء + المصاريف + السجل + الإعدادات + المستخدمين. هل أنت متأكد؟")) { el.value=''; return; }
+
+        const file = el.files && el.files[0];
+        if(!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            let pack;
+            try { pack = JSON.parse(e.target.result); }
+            catch(err){ alert("❌ الملف غير صالح"); el.value=''; return; }
+
+            const d = (pack && pack.data) ? pack.data : null;
+            if(!d || typeof d !== 'object') { alert("❌ ملف النسخة الاحتياطية غير صحيح"); el.value=''; return; }
+
+            const setRef = (p, v) => new Promise((resolve, reject) => {
+                db.ref(p).set((v===undefined)?null:v, (err) => err ? reject(err) : resolve(true));
+            });
+
+            Promise.all([
+                setRef('agents',   d.agents   || {}),
+                setRef('expenses', d.expenses || {}),
+                setRef('logs',     d.logs     || {}),
+                setRef('settings', d.settings || {}),
+                setRef('users',    d.users    || {})
+            ]).then(() => {
+                // restore localStorage keys
+                try{
+                    const ls = pack.localStorage || {};
+                    Object.keys(ls).forEach(k => localStorage.setItem(k, String(ls[k])));
+                }catch(e){}
+
+                alert("✅ تم استرجاع كل بيانات النظام بنجاح");
+                location.reload();
+            }).catch((err) => {
+                console.error(err);
+                alert("❌ حدث خطأ أثناء الاسترجاع (قد تكون الصلاحيات/الاتصال).");
+                el.value='';
+            });
+        };
+    // ===== Auto Backup (Daily 2:00 AM + keep 10 copies) =====
+    window.__buildFullBackupPack = () => {
+        const paths = ['agents','expenses','logs','settings','users'];
+        const reads = paths.map(p => new Promise((resolve) => {
+            db.ref(p).once('value', s => resolve([p, s.val() || {}]), _ => resolve([p, {}]));
+        }));
+        return Promise.all(reads).then(pairs => {
+            const dbData = Object.fromEntries(pairs);
+            const lsKeys = ['masar_user','masar_id','masar_settings','masar_view','masar_debt_limit'];
+            const lsData = {};
+            try{ lsKeys.forEach(k => { const v = localStorage.getItem(k); if(v !== null) lsData[k] = v; }); }catch(e){}
+            return {
+                meta: { schema: 1, app:'masar', type:'auto-full-backup', exported_at: new Date().toISOString() },
+                data: dbData,
+                localStorage: lsData
+            };
+        });
+    };
+
+    window.saveAutoBackupNow = () => {
+        return window.__buildFullBackupPack().then(pack=>{
+            const key = 'MASAR_AUTO_BACKUPS';
+            let arr = [];
+            try{ arr = JSON.parse(localStorage.getItem(key)||'[]') || []; }catch(e){ arr = []; }
+            arr.unshift({ ts: Date.now(), pack });
+            arr = arr.slice(0, 10); // keep last 10
+            localStorage.setItem(key, JSON.stringify(arr));
+            try{ console.log('AUTO BACKUP SAVED', new Date().toISOString()); }catch(e){}
+            return true;
+        }).catch(err=>{
+            console.error(err);
+            return false;
+        });
+    };
+
+    window.restoreLatestAutoBackup = () => {
+        const key = 'MASAR_AUTO_BACKUPS';
+        let arr = [];
+        try{ arr = JSON.parse(localStorage.getItem(key)||'[]') || []; }catch(e){ arr = []; }
+        if(!arr.length) { alert("لا توجد نسخة احتياطية تلقائية محفوظة"); return; }
+
+        if(!confirm("⚠️ سيتم استرجاع (آخر) نسخة احتياطية تلقائية واستبدال كل بيانات النظام. هل أنت متأكد؟")) return;
+
+        const pack = arr[0].pack;
+        const data = (pack && pack.data) ? pack.data : null;
+        if(!data) { alert("ملف النسخة التلقائية غير صالح"); return; }
+
+        const paths = ['agents','expenses','logs','settings','users'];
+        const writes = paths.map(p => db.ref(p).set(data[p] || {}));
+        Promise.all(writes).then(()=>{
+            try{
+                if(pack.localStorage){
+                    Object.keys(pack.localStorage).forEach(k=> localStorage.setItem(k, pack.localStorage[k]));
+                }
+            }catch(e){}
+            alert("✅ تم استرجاع آخر نسخة احتياطية تلقائية بنجاح");
+            location.reload();
+        }).catch(err=>{
+            console.error(err);
+            alert("تعذر استرجاع النسخة التلقائية");
+        });
+    };
+
+    window.__scheduleDailyAutoBackup = () => {
+        const enabledKey = 'MASAR_AUTO_BACKUP_ENABLED';
+        const enabled = (localStorage.getItem(enabledKey) ?? '1') === '1';
+        if(!enabled) return;
+
+        const now = new Date();
+        const target = new Date(now);
+        target.setHours(2,0,0,0); // 02:00 AM
+        if(target.getTime() <= now.getTime()) target.setDate(target.getDate()+1);
+
+        const ms = target.getTime() - now.getTime();
+        setTimeout(()=>{
+            window.saveAutoBackupNow().finally(()=>{
+                // reschedule every 24h
+                setInterval(()=>window.saveAutoBackupNow(), 24*60*60*1000);
+            });
+        }, ms);
+
+        // also do a backup on startup once (silent)
+        setTimeout(()=>window.saveAutoBackupNow(), 3500);
+    };
+
+        reader.readAsText(file);
+    };
+
+
 
     // Backup يومي تلقائي للأدمن (Agents فقط داخل Firebase)
     function tryAutoDailyAgentsBackup(){
@@ -2350,7 +2605,7 @@ ${lastTypeIcon} النوع: ${lastTypeTxt}
   }
 
   if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', enforceMenuOrder);
+    document.addEventListener('DOMContentLoaded', function(){ enforceMenuOrder(); try{__scheduleDailyAutoBackup();}catch(e){} try{__initInvoiceSeq();}catch(e){} try{__scheduleDailyAutoBackup();}catch(e){} try{__initInvoiceSeq();}catch(e){} });
   }else{
     enforceMenuOrder();
   }
@@ -3032,6 +3287,620 @@ if(typeof oldNav === "function"){
 })();
 </script>
 
+
+<script>
+/* === PATCH V71.1 (Logs + Reports ordering) === */
+(function(){
+  try{
+    // Local log buffer (works even if Firebase rules تمنع الكتابة أو أوفلاين)
+    const LOCAL_KEY = 'masar_local_logs_v1';
+    function loadLocal(){
+      try{ return JSON.parse(localStorage.getItem(LOCAL_KEY)||'[]') || []; }catch(e){ return []; }
+    }
+    function saveLocal(arr){
+      try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(arr.slice(0, 2000))); }catch(e){}
+    }
+    function normEntry(e){
+      const o = e||{};
+      return {
+        text: (o.text||o.msg||'').toString(),
+        msg: (o.msg||'').toString(),
+        date: o.date || o.createdAt || o.time || o.ts || new Date().toISOString(),
+        by: (o.by||o.user||'').toString(),
+        role: (o.role||'').toString(),
+        meta: o.meta||{},
+        _pending: !!o._pending
+      };
+    }
+    function keyOf(e){
+      return `${e.date}|${e.by}|${e.text||e.msg}`;
+    }
+
+    window.__logsLocal = loadLocal().map(normEntry);
+    window.__logsRemote = window.__logsRemote || [];
+
+    function mergeLogs(){
+      const map = new Map();
+      (window.__logsRemote||[]).map(normEntry).forEach(x=>map.set(keyOf(x), x));
+      (window.__logsLocal||[]).map(normEntry).forEach(x=>{
+        const k=keyOf(x);
+        if(!map.has(k)) map.set(k, x);
+      });
+      return Array.from(map.values());
+    }
+
+    // Override renderLogsUI to use merged logs
+    const oldRenderLogs = window.renderLogsUI;
+    window.renderLogsUI = function(){
+      try{
+        window.logs = mergeLogs(); // keep compatibility with existing code that reads global logs
+      }catch(e){}
+      try{ return oldRenderLogs(); }catch(e){
+        // If original not available, do a minimal render
+        try{
+          const box = document.getElementById('logsListUI'); if(!box) return;
+          const items = (window.logs||[]).slice().sort((a,b)=> new Date(b.date)-new Date(a.date));
+          box.innerHTML = items.map(x=>`<div class="card" style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+              <div style="font-weight:800">🧑‍💼 ${(x.by||x.createdBy||x.addedBy||x.user||x.username||'غير معروف')}</div>
+              <div style="font-size:12px;color:#6b7280">${new Date(x.date).toLocaleString('en-GB')}</div>
+            </div>
+            <div style="margin-top:6px">${(x.text||x.msg||'')}</div>
+          </div>`).join('');
+        }catch(_){}
+      }
+    };
+
+    // Robust log writer: always writes to local first, then tries Firebase
+    const oldLog = window.log;
+    window.log = function(text, meta){
+      try{
+        const entry = normEntry({
+          text: String(text||''),
+          date: new Date().toISOString(),
+          by: (typeof __getActor==='function'?__getActor(): (window.currentUser&&window.currentUser.username)||'system'),
+          role: (typeof __getRole==='function'?__getRole(): (window.currentUser&&window.currentUser.role)||''),
+          meta: meta || {},
+          _pending: true
+        });
+
+        // prepend locally (newest first)
+        window.__logsLocal = [entry, ...(window.__logsLocal||[])];
+        saveLocal(window.__logsLocal);
+        try{ window.logs = mergeLogs(); }catch(e){}
+        try{ if(typeof window.renderLogsUI==='function') window.renderLogsUI(); }catch(e){}
+
+        // Try Firebase push
+        const _db = (window.db || (typeof db!=='undefined'?db:null));
+        if(_db && _db.ref){
+          _db.ref('logs').push({...entry, _pending:false}).then(()=>{
+            // mark as synced
+            entry._pending = false;
+            // remove from local pending list (same key)
+            const k = keyOf(entry);
+            window.__logsLocal = (window.__logsLocal||[]).filter(x=> keyOf(normEntry(x)) !== k);
+            saveLocal(window.__logsLocal);
+            try{ window.logs = mergeLogs(); }catch(e){}
+          }).catch(()=>{ /* keep pending */ });
+        }
+      }catch(e){
+        try{ if(typeof oldLog==='function') oldLog(text, meta); }catch(_){}
+      }
+    };
+
+    // Hook remote logs listener once Firebase is ready
+    function attachLogsListener(){
+      try{
+        const _db = (window.db || (typeof db!=='undefined'?db:null));
+        if(!_db || !_db.ref) return false;
+        _db.ref('logs').on('value', s=>{
+          const v = s.val() || {};
+          // keep newest first by date later
+          window.__logsRemote = Object.values(v);
+          try{ window.logs = mergeLogs(); }catch(e){}
+          try{ window.renderLogsUI(); }catch(e){}
+        });
+        return true;
+      }catch(e){ return false; }
+    }
+    // try now + retry (for slow init)
+    if(!attachLogsListener()){
+      let tries=0;
+      const t=setInterval(()=>{
+        tries++;
+        if(attachLogsListener() || tries>10) clearInterval(t);
+      }, 500);
+    }
+
+    // Reports ordering: newest first (and keep "منو" واضح)
+    if(typeof window.runReport === 'function'){
+      const oldRun = window.runReport;
+      window.runReport = () => {
+        oldRun();
+        try{
+          // Force newest first in cache
+          if(window.__reportCache && Array.isArray(window.__reportCache.data)){
+            window.__reportCache.data.sort((a,b)=> new Date(b.date) - new Date(a.date));
+            window.__reportCache.page = 1;
+            if(typeof window.__renderReportPage === 'function') window.__renderReportPage();
+            else if(typeof __renderReportPage === 'function') __renderReportPage();
+          }
+        }catch(e){}
+      };
+    }
+
+
+    // Auto-refresh: show Logs + Reports مباشرة بدون ضغط زر
+    function __autoBind(){
+      try{
+        // عند فتح صفحة التقارير: شغل التقرير مباشرة + عند تغيير التاريخ
+        const rf = document.getElementById('repFrom');
+        const rt = document.getElementById('repTo');
+        if(rf && rt && typeof window.runReport === 'function'){
+          rf.addEventListener('change', ()=>{ try{ window.runReport(); }catch(e){} });
+          rt.addEventListener('change', ()=>{ try{ window.runReport(); }catch(e){} });
+          // تشغيل تلقائي أول مرة
+          setTimeout(()=>{ try{ window.runReport(); }catch(e){} }, 250);
+        }
+
+        // عند فتح سجل النشاطات: اعرض مباشرة + تحديث دوري خفيف
+        if(typeof window.renderLogsUI === 'function'){
+          setTimeout(()=>{ try{ window.renderLogsUI(); }catch(e){} }, 200);
+          if(!window.__logsAutoTimer){
+            window.__logsAutoTimer = setInterval(()=>{ 
+              try{
+                const lv = document.getElementById('logsView');
+                if(lv && lv.style && lv.style.display !== 'none') window.renderLogsUI();
+              }catch(e){}
+            }, 1500);
+          }
+        }
+
+        // ربط nav حتى إذا تنقلت للتقارير/السجل ينعرض فوراً
+        const _nav = window.nav;
+        if(typeof _nav === 'function' && !window.__navAutoPatched){
+          window.__navAutoPatched = true;
+          window.nav = function(v){
+            _nav(v);
+            setTimeout(()=>{
+              try{
+                if(v==='reports' && typeof window.runReport==='function') window.runReport();
+                if(v==='logs' && typeof window.renderLogsUI==='function') window.renderLogsUI();
+              }catch(e){}
+            }, 120);
+          };
+        }
+      }catch(e){}
+    }
+
+    // شغل الربط بعد تحميل الصفحة
+    window.addEventListener('load', __autoBind);
+
+  }catch(e){ console.warn('PATCH V71.1 failed', e); }
+})();
+</script>
+
+
+<script>
+function downloadAgentsExcel(){
+    if(!window.agents || !agents.length){
+        alert("لا توجد بيانات وكلاء للتصدير");
+        return;
+    }
+    const data = agents.map((a, i)=>{
+        let bal = 0;
+        if(a.trans){
+            Object.values(a.trans).forEach(t=>{
+                if(t.type==='debt') bal += parseFloat(t.amt||0);
+                else bal -= parseFloat(t.amt||0);
+            });
+        }
+        return {
+            "ت": i+1,
+            "الاسم": a.name||'',
+            "الهاتف": a.phone||'',
+            "العنوان": a.address||'',
+            "الرصيد": bal
+        };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "الوكلاء");
+    XLSX.writeFile(wb, "agents.xlsx");
+}
+</script>
+
+
+<script>
+function saveAutoBackupNow(){
+  // يحفظ نسخة "تلقائية" بنفس آلية النسخ التلقائي (بدون استرجاع)
+  try{
+    if(typeof autoBackupNow === 'function'){
+      autoBackupNow(true); // force
+      alert("تم حفظ نسخة احتياطية تلقائية ✅");
+      return;
+    }
+    if(typeof runAutoBackup === 'function'){
+      runAutoBackup(true);
+      alert("تم حفظ نسخة احتياطية تلقائية ✅");
+      return;
+    }
+    if(typeof createAutoBackup === 'function'){
+      createAutoBackup(true);
+      alert("تم حفظ نسخة احتياطية تلقائية ✅");
+      return;
+    }
+    // fallback: استخدم نسخة كاملة لكن خزّنها ضمن autoBackups في localStorage
+    const payload = (typeof buildFullBackupPayload==='function')
+      ? buildFullBackupPayload()
+      : (typeof getFullBackupData==='function' ? getFullBackupData() : null);
+
+    if(!payload){
+      // آخر حل: استدعاء backupAll إذا موجود
+      if(typeof backupAll==='function'){ backupAll(); }
+      else alert("تعذر حفظ النسخة التلقائية");
+      return;
+    }
+
+    const key="masar_auto_backups";
+    const list = JSON.parse(localStorage.getItem(key)||"[]");
+    list.unshift({ts: Date.now(), data: payload});
+    while(list.length>10) list.pop();
+    localStorage.setItem(key, JSON.stringify(list));
+    alert("تم حفظ نسخة احتياطية تلقائية ✅");
+  }catch(e){
+    console.error(e);
+    alert("صار خطأ أثناء الحفظ التلقائي");
+  }
+}
+</script>
+
+
+<script>
+function setExpFilter(filter, btn){
+  try{
+    let f = (filter||'all').toString().trim();
+    // map UI labels to base categories used by filter
+    if(f === 'مصروف يومي') f = 'يومي';
+    if(f === 'إيجارات' || f === 'ايجارات' || f === 'إيجار' || f === 'ايجار') f = 'ايجارات';
+    // keep 'رواتب' as is
+    if(f === 'أخرى' || f === 'اخرى') f = 'أخرى';
+    currentExpFilter = f;
+// active class toggle
+    document.querySelectorAll('#expensesView .filters-row .filter-btn').forEach(b=>b.classList.remove('active'));
+    if(btn) btn.classList.add('active');
+
+    if(typeof window.renderExpensesList === 'function') window.renderExpensesList();
+  }catch(e){
+    console.error(e);
+  }
+}
+</script>
+
+
+<script>
+/* ================== FINAL FIX: EXPENSE CATEGORY FILTERS (رواتب/ايجارات/يومي/أخرى) ==================
+   Replaces any previous renderers with a clean renderer that respects currentExpFilter.
+*/
+(function(){
+  function normCat(v){
+    v = (v||'').toString().trim();
+    if(!v) return '';
+    // Arabic normalization
+    v = v.replace(/إيجارات/g,'ايجارات').replace(/إيجار/g,'ايجارات').replace(/ايجار/g,'ايجارات');
+    v = v.replace(/مصروف\s*يومي/g,'يومي');
+    // English fallbacks (in case old data exists)
+    const vv = v.toLowerCase();
+    if(vv === 'daily' || vv.includes('daily')) return 'يومي';
+    if(vv === 'salary' || vv.includes('salary')) return 'رواتب';
+    if(vv === 'rent' || vv.includes('rent')) return 'ايجارات';
+    if(vv === 'other' || vv.includes('other')) return 'أخرى';
+
+    if(vv.includes('راتب') || vv.includes('رواتب')) return 'رواتب';
+    if(vv.includes('ايجار') || vv.includes('ايجارات')) return 'ايجارات';
+    if(vv.includes('يومي')) return 'يومي';
+    if(vv.includes('اخرى') || vv.includes('أخرى')) return 'أخرى';
+    return v;
+  }
+
+  window.renderExpensesList = function(){
+    try{
+      const list = document.getElementById('expensesListUI');
+      if(!list) return;
+
+      const txt = (document.getElementById('expSearchText')?.value || '').trim();
+      const from = (document.getElementById('expFrom')?.value || '').trim();
+      const to   = (document.getElementById('expTo')?.value || '').trim();
+
+      const all = Array.isArray(window.expenses) ? window.expenses.slice() : [];
+      const wanted = normCat(window.currentExpFilter || 'all');
+
+      // ---- filter by category button ----
+      let res = all;
+      if(wanted && wanted !== 'all'){
+        res = res.filter(e=>{
+          const c1 = normCat(e.category);
+          const c2 = normCat(e.cat);
+          const c3 = normCat(e.type);
+          const c4 = normCat(e.note);
+          return (c1===wanted) || (c2===wanted) || (c3===wanted) || (c4===wanted);
+        });
+      }
+
+      // ---- search text ----
+      if(txt){
+        res = res.filter(e=>{
+          const s = (e.type||'') + ' ' + (e.note||'') + ' ' + (e.category||'');
+          return s.includes(txt);
+        });
+      }
+
+      // ---- date range ----
+      if(from) res = res.filter(e => ((e.date||'').split('T')[0] || '') >= from);
+      if(to)   res = res.filter(e => ((e.date||'').split('T')[0] || '') <= to);
+
+      // ---- sort newest first ----
+      res.sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
+
+      // ---- render ----
+      list.innerHTML = '';
+      let totalFiltered = 0;
+
+      res.forEach((e, i)=>{
+        const amt = parseFloat(e.amount||0) || 0;
+        totalFiltered += amt;
+
+        const dt = e.date ? new Date(e.date).toLocaleString('en-GB') : '';
+        const cat = normCat(e.category) || '—';
+        const by  = (e.by || e.createdBy || e.user || '').toString().trim();
+
+        list.insertAdjacentHTML('beforeend', `
+          <div class="list-item">
+            <div style="display:flex; align-items:center; gap:10px">
+              <span style="background:#fff7ed; color:#c2410c; width:25px; height:25px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:bold">${i+1}</span>
+              <div class="item-details">
+                <h4 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+                  <span>${(e.type||'')}</span>
+                  <span style="font-size:.75rem; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#3730a3"> ${cat} </span>
+                </h4>
+                <p>${dt}${by ? ` | بواسطة: ${by}` : ''}${e.note ? ` | ${e.note}` : ''}</p>
+              </div>
+            </div>
+            <div style="text-align:left; display:flex; align-items:center; gap:8px">
+              <div style="font-weight:bold; color:var(--orange)">${fmt(amt)}</div>
+              <button onclick="editExp('${e.id}')" class="action-btn-small" style="background:#ffedd5; color:#c2410c">✏️</button>
+            </div>
+          </div>
+        `);
+      });
+
+      const totEl = document.getElementById('expTotal');
+      if(totEl) totEl.innerText = fmt(totalFiltered);
+
+      // ---- year total (ALL expenses in current year, regardless of category filter) ----
+      let yearTotalAll = 0;
+      try{
+        const now = new Date();
+        const start = new Date(now.getFullYear(),0,1,0,0,0).getTime();
+        const end   = new Date(now.getFullYear(),11,31,23,59,59).getTime();
+        all.forEach(e=>{
+          const t = new Date(e.date||0).getTime();
+          if(t>=start && t<=end) yearTotalAll += (parseFloat(e.amount||0) || 0);
+        });
+      }catch(_){}
+      const yEl = document.getElementById('expYearTotal');
+      if(yEl) yEl.innerText = fmt(yearTotalAll);
+
+    }catch(err){
+      console.error(err);
+    }
+  };
+
+  // Ensure filter buttons re-render correctly
+  if(typeof window.setExpFilter === 'function'){
+    const _oldSet = window.setExpFilter;
+    window.setExpFilter = function(filter, btn){
+      _oldSet(filter, btn);
+      try{ window.renderExpensesList(); }catch(e){}
+    }
+  }
+
+  // initial
+  try{ window.renderExpensesList(); }catch(e){}
+})();
+</script>
+
+
+<!-- ====================== ACTIVITY LOGS - SHOW ACTOR (ADMIN/EMPLOYEE) PATCH ====================== -->
+<script>
+(function(){
+  // --- helpers ---
+  function __safeStr(x){ try{return (x==null?'':String(x)).trim();}catch(e){return '';} }
+  function __roleNorm(r){ r=__safeStr(r).toLowerCase(); if(!r) return 'user'; return r; }
+  window.__getActor = window.__getActor || function(){
+    // prefer currentUser.username, fallback to localStorage session
+    try{
+      if(window.currentUser && __safeStr(window.currentUser.username)) return __safeStr(window.currentUser.username);
+      var u = localStorage.getItem('masar_user'); if(u) return __safeStr(u);
+    }catch(e){}
+    return 'غير معروف';
+  };
+  window.__getRole = window.__getRole || function(){
+    try{
+      if(window.currentUser && __safeStr(window.currentUser.role)) return __roleNorm(window.currentUser.role);
+    }catch(e){}
+    return '';
+  };
+
+  // --- Ensure every log entry has by/role, and store in Firebase + local fallback ---
+  var LOCAL_KEY = 'masar_logs_local_v2';
+  function loadLocal(){ try{ return JSON.parse(localStorage.getItem(LOCAL_KEY)||'[]')||[]; }catch(e){ return []; } }
+  function saveLocal(arr){ try{ localStorage.setItem(LOCAL_KEY, JSON.stringify(arr.slice(0, 2000))); }catch(e){} }
+  function normEntry(o){
+    o=o||{};
+    return {
+      id: o.id || o.key || o._id || '',
+      text: __safeStr(o.text || o.msg),
+      date: o.date || o.createdAt || o.time || o.ts || new Date().toISOString(),
+      by: __safeStr(o.by || o.user || o.username || o.createdBy || o.addedBy),
+      role: __safeStr(o.role || ''),
+      meta: o.meta || {}
+    };
+  }
+  function toArrayFromPush(obj){
+    var out=[];
+    if(!obj) return out;
+    Object.keys(obj).forEach(function(k){
+      var v = obj[k] || {};
+      v.id = k;
+      out.push(normEntry(v));
+    });
+    return out;
+  }
+
+  // keep local
+  window.__logsLocal = loadLocal().map(normEntry);
+  window.__logsRemote = window.__logsRemote || [];
+
+  function mergeLogs(){
+    var map = new Map();
+    (window.__logsRemote||[]).map(normEntry).forEach(function(x){
+      var k = (x.date||'') + '|' + (x.by||'') + '|' + (x.text||'');
+      map.set(k, x);
+    });
+    (window.__logsLocal||[]).map(normEntry).forEach(function(x){
+      var k = (x.date||'') + '|' + (x.by||'') + '|' + (x.text||'');
+      if(!map.has(k)) map.set(k, x);
+    });
+    return Array.from(map.values());
+  }
+
+  // patch log()
+  var oldLog = window.log;
+  window.log = function(text, meta){
+    try{
+      var entry = normEntry({
+        text: __safeStr(text),
+        date: new Date().toISOString(),
+        by: window.__getActor(),
+        role: window.__getRole(),
+        meta: meta || {}
+      });
+
+      // local first
+      window.__logsLocal = [entry].concat(window.__logsLocal||[]);
+      saveLocal(window.__logsLocal);
+
+      // remote (append-only)
+      if(window.db){
+        try{ window.db.ref('logs').push(entry); }catch(e){}
+      }
+      return entry;
+    }catch(e){
+      try{ if(typeof oldLog==='function') return oldLog(text, meta); }catch(_){}
+    }
+  };
+
+  // patch renderLogsUI to show actor
+  function renderLogsFallback(){
+    var box = document.getElementById('logsListUI') || document.getElementById('logsList') || document.getElementById('logsListContainer');
+    if(!box) return;
+
+    var items = mergeLogs().slice().sort(function(a,b){ return new Date(b.date)-new Date(a.date); });
+    // only keep in global for compatibility
+    window.logs = items;
+
+    box.innerHTML = items.map(function(x, i){
+      var who = x.by ? x.by : '';
+      if(!who){
+        // محاولة استخراج الاسم من بداية النص (مثل: admin@...:)
+        var t = (x.text||'');
+        var m = t.match(/^\s*([^:]{3,40})\s*:\s*/);
+        if(m && m[1]) who = m[1].trim();
+      }
+      if(!who) who = 'غير معروف';
+      var role = x.role ? (' • ' + x.role) : '';
+      var dt = '';
+      try{ dt = new Date(x.date).toLocaleString('en-GB'); }catch(e){ dt = x.date||''; }
+      return `
+        <div class="list-item" style="cursor:default">
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:center">
+            <div style="font-weight:800">🧑‍💼 ${who}${role}</div>
+            <div style="font-size:12px; color:#6b7280">${dt}</div>
+          </div>
+          <div style="margin-top:6px">${(x.text||'')}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  var oldRenderLogsUI = window.renderLogsUI;
+  window.renderLogsUI = function(){
+    try{
+      if(typeof oldRenderLogsUI === 'function') oldRenderLogsUI();
+    }catch(e){}
+    // force our actor line even لو الواجهة القديمة ما تطبعه
+    try{ renderLogsFallback(); }catch(e){}
+  };
+
+  // subscribe remote logs (Firebase)
+  function attachLogsListener(){
+    try{
+      if(!window.db) return;
+      if(window.__logsListenerAttached) return;
+      window.__logsListenerAttached = true;
+
+      window.db.ref('logs').limitToLast(1500).on('value', function(snap){
+        try{
+          var val = snap.val() || {};
+          window.__logsRemote = toArrayFromPush(val);
+          // refresh only if logs view open or list exists
+          if(document.getElementById('logsView') && document.getElementById('logsView').style.display !== 'none'){
+            window.renderLogsUI();
+          }
+        }catch(e){}
+      });
+    }catch(e){}
+  }
+
+  // hook startApp + nav('logs') to ensure listener and immediate render
+  var oldStartApp = window.startApp;
+  if(typeof oldStartApp === 'function'){
+    window.startApp = function(u){
+      var r = oldStartApp.apply(this, arguments);
+      setTimeout(function(){
+        attachLogsListener();
+        // render if logs already visible
+        try{ window.renderLogsUI(); }catch(e){}
+      }, 800);
+      return r;
+    }
+  }
+
+  var oldNav = window.nav;
+  if(typeof oldNav === 'function'){
+    window.nav = function(v){
+      var r = oldNav.apply(this, arguments);
+      if(v==='logs'){
+        setTimeout(function(){
+          attachLogsListener();
+          try{ window.renderLogsUI(); }catch(e){}
+        }, 300);
+      }
+      return r;
+    }
+  }
+
+  // initial (for already logged in)
+  setTimeout(function(){
+    attachLogsListener();
+    try{ window.renderLogsUI(); }catch(e){}
+  }, 1200);
+})();
+</script>
+<!-- ====================== END ACTIVITY LOGS PATCH ====================== -->
+
 </body>
 </html>
 
@@ -3589,7 +4458,7 @@ setTimeout(addPDFButtons, 1000);
                         date: x.date || '',
                         note: x.note || '',
                         voucherNo: x.voucherNo || '',
-                        by: x.by || 'غير معروف'
+                        by: (x.by || x.createdBy || (x.meta&&x.meta.by) || x.addedBy || x.user || x.username || 'مستوردة/غير معروفة')
                     });
                 });
             });
@@ -3607,7 +4476,7 @@ setTimeout(addPDFButtons, 1000);
                     date: e.date || '',
                     note: e.note || '',
                     voucherNo: e.voucherNo || '',
-                    by: e.by || 'غير معروف'
+                    by: (e.by || e.createdBy || e.addedBy || e.user || e.username || 'مستوردة/غير معروفة')
                 });
             });
         }
@@ -3944,9 +4813,9 @@ setTimeout(addPDFButtons, 1000);
       try{
         const cat = document.getElementById('inExCat') ? document.getElementById('inExCat').value : '';
         // Temporarily intercept db update by copying original logic with category added
-        const t = document.getElementById('inExType').value;
+        const t = ((document.getElementById('inExCat')?.value)||'').trim() || 'مصروف';
         const a = parseFloat(document.getElementById('inExAmt').value.replace(/,/g,''));
-        if(!t || isNaN(a)) return;
+        if(isNaN(a)) return;
         const obj = { type: t, amount: a, date: document.getElementById('inExDate').value, note: document.getElementById('inExNote').value, category: cat };
 
         if(editId) {
@@ -4114,7 +4983,10 @@ setTimeout(addPDFButtons, 1000);
           date: document.getElementById('inTrDate').value, 
           note: document.getElementById('inTrNote').value,
           createdBy: (currentUser && currentUser.username) ? currentUser.username : ''
-        };
+        ,
+          by: __getActor(),
+          role: __getRole()
+};
         const id = Date.now(); 
 
         const agIndex = agents.findIndex(x => x.id == curAgentId);
@@ -4886,15 +5758,18 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
     window.__vipSaveExpReceipt = true;
     window.saveExp = function(){
       try{
-        const t = document.getElementById('inExType').value;
+        const t = ((document.getElementById('inExCat')?.value)||'').trim() || 'مصروف';
         const a = parseFloat(document.getElementById('inExAmt').value.replace(/,/g,''));
-        if(!t || isNaN(a)) return;
+        if(isNaN(a)) return;
         const cat = document.getElementById('inExCat') ? document.getElementById('inExCat').value : 'other';
         const obj = { 
           type: t, amount: a, date: document.getElementById('inExDate').value, note: document.getElementById('inExNote').value,
           category: cat,
           createdBy: (currentUser && currentUser.username) ? currentUser.username : ''
-        };
+        ,
+          by: __getActor(),
+          role: __getRole()
+};
 
         if(editId) {
           const ex = (expenses||[]).find(x=> String(x.id)===String(editId));
@@ -4943,7 +5818,10 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
           date: document.getElementById('inTrDate').value,
           note: document.getElementById('inTrNote').value,
           createdBy: (currentUser && currentUser.username) ? currentUser.username : ''
-        };
+        ,
+          by: __getActor(),
+          role: __getRole()
+};
 
         const agIndex = agents.findIndex(x => x.id == curAgentId);
         if(agIndex < 0) return;
@@ -5233,7 +6111,38 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
     window.__vipExpenseMetaShown = true;
     const old = window.renderExpensesList;
     window.renderExpensesList = function(){
+      // Apply category filter (رواتب/ايجارات/يومي/أخرى) BEFORE rendering
+      const __allExpenses = Array.isArray(expenses) ? expenses.slice() : [];
+      let __filteredExpenses = __allExpenses;
+      try{
+        function __normExpCat(v){
+          v = (v||'').toString().trim();
+          if(!v) return '';
+          v = v.replace(/إيجارات/g,'ايجارات').replace(/إيجار/g,'ايجارات').replace(/ايجار/g,'ايجارات');
+          v = v.replace(/مصروف يومي/g,'يومي');
+          const vv = v.toLowerCase();
+          if(vv.includes('راتب') || vv.includes('رواتب')) return 'رواتب';
+          if(vv.includes('ايجار') || vv.includes('ايجارات') || vv.includes('إيجار') || vv.includes('إيجارات')) return 'ايجارات';
+          if(vv.includes('يومي') || vv.includes('مصروف يومي')) return 'يومي';
+          if(vv.includes('اخرى') || vv.includes('أخرى')) return 'أخرى';
+          return v;
+        }
+        const __wanted = __normExpCat(currentExpFilter);
+        if(__wanted && __wanted !== 'all'){
+          __filteredExpenses = __allExpenses.filter(e=>{
+            const c1 = __normExpCat(e.category);
+            const c2 = __normExpCat(e.cat);
+            const c3 = __normExpCat(e.type);
+            const c4 = __normExpCat(e.note);
+            return (c1===__wanted) || (c2===__wanted) || (c3===__wanted) || (c4===__wanted);
+          });
+        }
+      }catch(e){}
+      // temporarily swap expenses so old renderer shows only filtered rows
+      expenses = __filteredExpenses;
+
       old();
+      expenses = __allExpenses;
       try{
         document.querySelectorAll('#expensesListUI .list-item').forEach(item=>{
           if(item.querySelector('.vip-exp-meta')) return;
@@ -5299,11 +6208,41 @@ VIP FEATURES ADDED (بدون حذف أي شيء):
 
 
 // ===== 
+
+// ===== Init Invoice Sequence From Existing Data =====
+window.__initInvoiceSeq = function(){
+  try{
+    let maxSeq = 0;
+    const scan = (v)=>{
+      if(!v) return;
+      const s = String(v);
+      // INV-000123
+      let m = s.match(/INV-(\d+)/);
+      if(m) maxSeq = Math.max(maxSeq, parseInt(m[1],10)||0);
+      // MASAR-EX-2026-000123
+      m = s.match(/-(\d{6})$/);
+      if(m) maxSeq = Math.max(maxSeq, parseInt(m[1],10)||0);
+    };
+
+    (window.expenses||[]).forEach(e=>scan(e.voucherNo));
+    (window.agents||[]).forEach(a=>{
+      const tr = a.trans || {};
+      Object.keys(tr).forEach(k=>scan(tr[k]?.voucherNo));
+    });
+
+    if(maxSeq>0){
+      const key='masar_invoice_seq';
+      const cur=parseInt(localStorage.getItem(key)||'0',10)||0;
+      if(maxSeq>cur) localStorage.setItem(key, String(maxSeq));
+    }
+  }catch(e){}
+};
+
 // ===== Agents Excel Export (PWA SAFE) =====
 
 
 
-// ===== Agents Excel Export (ROBUST + PWA SAFE) =====
+// ===== Agents Excel Export (XLSX + CSV fallback) =====
 window.downloadAgentsExcel = function () {
   try {
     const search = (document.getElementById('agSearch')?.value || '').trim();
@@ -5324,6 +6263,32 @@ window.downloadAgentsExcel = function () {
       return;
     }
 
+    // ===== 1) XLSX (Excel حقيقي) =====
+    if (window.XLSX && XLSX.utils) {
+      const rows = res.map((a,i)=>({
+        "ت": i+1,
+        "اسم الوكيل": a.name || "",
+        "الهاتف": a.phone || "",
+        "العنوان": a.address || "",
+        "ملاحظات": a.note || "",
+        "تاريخ الإضافة": (a.createdAt ? new Date(a.createdAt).toLocaleString('en-GB') : "")
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows, {skipHeader:false});
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "الوكلاء");
+
+      const fname = `agents_${new Date().toISOString().slice(0,10)}.xlsx`;
+
+      try{
+        XLSX.writeFile(wb, fname, {compression:true});
+        return;
+      }catch(e){
+        console.warn("XLSX writeFile blocked, fallback to CSV", e);
+      }
+    }
+
+    // ===== 2) CSV fallback (PWA-safe) =====
     let csv = "\ufeff" + "ت,اسم الوكيل,الهاتف,العنوان,ملاحظات,تاريخ الإضافة\n";
     res.forEach((a,i)=>{
       const row = [
@@ -5339,7 +6304,6 @@ window.downloadAgentsExcel = function () {
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
 
-    // IE/Edge legacy
     if (window.navigator && window.navigator.msSaveOrOpenBlob) {
       window.navigator.msSaveOrOpenBlob(blob, "agents_export.csv");
       return;
@@ -5352,14 +6316,10 @@ window.downloadAgentsExcel = function () {
     a.target = "_blank";
     a.rel = "noopener";
     document.body.appendChild(a);
-
-    // Real click event
     a.dispatchEvent(new MouseEvent("click", { bubbles:true, cancelable:true, view:window }));
     a.remove();
-
     setTimeout(()=>URL.revokeObjectURL(url), 1200);
 
-    // Fallback (some PWA block blob downloads)
     setTimeout(()=>{
       try{
         const dataUrl = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
@@ -5371,6 +6331,7 @@ window.downloadAgentsExcel = function () {
         b.remove();
       }catch(_){}
     }, 200);
+
   } catch (err) {
     console.error(err);
     alert("تعذر تحميل Excel للوكلاء");
