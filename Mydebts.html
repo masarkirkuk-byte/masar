@@ -7632,128 +7632,199 @@ window.adjustAgentBalance = async function(ev){
 
 <script>
 (function(){
-    // 1. نظام تسجيل الحضور (Tracking System)
-    function startPresenceSystem(){
-        try {
-            if(!window.firebase || !firebase.database) return;
-            
-            var db = firebase.database();
-            var u = (window.currentUser && window.currentUser.username) 
-                    ? window.currentUser.username 
-                    : (localStorage.getItem('masar_user') || '');
-            
-            var r = (window.currentUser && window.currentUser.role) 
-                    ? window.currentUser.role 
-                    : (localStorage.getItem('masar_role') || 'user');
+    
+    function organizeDashboardUI() {
+        var mainView = document.getElementById('mainView');
+        var menu = document.querySelector('#mainView .main-menu');
+        
+        if (!mainView || !menu) return;
 
-            if(!u) return; // إذا غير مسجل دخول لا تسوي شي
+        // --- 1. تجهيز حاوية (Container) للأرقام المالية ---
+        var financeBox = document.getElementById('financeBox');
+        if (!financeBox) {
+            financeBox = document.createElement('div');
+            financeBox.id = 'financeBox';
+            financeBox.style.display = 'none'; // مخفي
+            financeBox.style.padding = '10px';
+            financeBox.style.background = '#f8fafc';
+            financeBox.style.borderRadius = '12px';
+            financeBox.style.marginTop = '10px';
+            financeBox.style.border = '1px solid #e2e8f0';
+            mainView.appendChild(financeBox);
+        }
 
-            // مرجع الاتصال الخاص بفايربيس (يعرف متى يفصل النت)
-            var amOnline = db.ref('.info/connected');
-            var userRef = db.ref('presence/' + u);
+        // --- 2. تجهيز حاوية (Container) للنسخ الاحتياطي ---
+        var backupBox = document.getElementById('backupContainerBox');
+        if (!backupBox) {
+            backupBox = document.createElement('div');
+            backupBox.id = 'backupContainerBox';
+            backupBox.style.display = 'none'; // مخفي
+            backupBox.style.marginTop = '10px';
+            mainView.appendChild(backupBox);
+        }
 
-            amOnline.on('value', function(snapshot) {
-                if (snapshot.val()) {
-                    // إذا اتصل، سجل بياناته
-                    userRef.onDisconnect().remove(); // احذفني إذا فصلت النت
-                    userRef.set({
-                        name: u,
-                        role: r,
-                        loginTime: new Date().toLocaleTimeString('en-US'),
-                        lastSeen: firebase.database.ServerValue.TIMESTAMP
-                    });
+        // --- 3. نقل عناصر "المالية" إلى الحاوية الخاصة بها ---
+        // نختار كل شيء له علاقة بالأرقام (stats, summaries, charts)
+        var financeSelectors = [
+            '.stats-row', 
+            '.total-summary', 
+            '#dashChart', 
+            '.list-container', // الشارت عادة يكون داخل list-container
+            '.section-header'  // العناوين
+        ];
+
+        financeSelectors.forEach(function(sel) {
+            var elements = mainView.querySelectorAll(sel);
+            elements.forEach(function(el) {
+                // شرط مهم: ننقل فقط العناصر الموجودة مباشرة في الواجهة الرئيسية
+                // ولا ننقل القائمة الرئيسية نفسها (.main-menu)
+                if (el.parentNode === mainView && !el.classList.contains('main-menu') && el !== financeBox && el !== backupBox) {
+                    financeBox.appendChild(el);
                 }
             });
-        } catch(e) {}
-    }
-
-    // 2. زر عرض المتصلين (للأدمن فقط)
-    function showOnlineButton(){
-        // تأكد أن المستخدم الحالي هو أدمن
-        var myRole = (window.currentUser && window.currentUser.role) 
-                     ? window.currentUser.role 
-                     : (localStorage.getItem('masar_role') || '');
-        
-        if(myRole !== 'admin') return; 
-
-        var headerRight = document.querySelector('.header-right');
-        if(!headerRight) return;
-        
-        if(document.getElementById('btnShowOnline')) return;
-
-        var btn = document.createElement('button');
-        btn.id = 'btnShowOnline';
-        btn.className = 'header-btn';
-        btn.style.cssText = `
-            background: #4f46e5; 
-            color: white; 
-            margin-left: 5px; 
-            font-weight: bold;
-            display: flex; align-items: center; gap: 5px;
-        `;
-        btn.innerHTML = '🟢 المتصلين';
-        
-        btn.onclick = function(){
-            openOnlineModal();
-        };
-
-        // نضيف الزر في اليمين بجانب زر الخروج
-        headerRight.insertBefore(btn, headerRight.firstChild);
-    }
-
-    // 3. نافذة عرض القائمة
-    function openOnlineModal(){
-        var m = document.getElementById('modal');
-        var b = document.getElementById('modalBody');
-        m.style.display = 'flex';
-        b.innerHTML = '<h3 style="text-align:center">جاري جلب المتصلين...</h3>';
-
-        firebase.database().ref('presence').once('value', function(snap){
-            var users = snap.val() || {};
-            var count = Object.keys(users).length;
-            
-            let html = `<h3 style="text-align:center; margin-bottom:15px">🟢 المتصلين الآن (${count})</h3>`;
-            html += `<div class="list-container" style="max-height:300px; overflow:auto">`;
-
-            if(count === 0){
-                html += '<div style="text-align:center; padding:10px">لا يوجد أحد غيرك!</div>';
-            } else {
-                Object.values(users).forEach(user => {
-                    var isAdmin = (user.role === 'admin');
-                    var badgeColor = isAdmin ? '#fbbf24' : '#94a3b8'; // ذهبي للأدمن، رصاصي للموظف
-                    var badgeText = isAdmin ? 'Admin' : 'User';
-                    var bg = isAdmin ? '#fffbeb' : '#f8fafc'; // خلفية مميزة للأدمن
-
-                    html += `
-                    <div class="list-item" style="background:${bg}; padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
-                        <div style="display:flex; align-items:center; gap:10px;">
-                            <span style="font-size:1.2rem">${isAdmin ? '👑' : '👤'}</span>
-                            <div>
-                                <div style="font-weight:900; font-size:1rem">${user.name}</div>
-                                <div style="font-size:0.8rem; color:gray">دخول: ${user.loginTime || '-'}</div>
-                            </div>
-                        </div>
-                        <span style="background:${badgeColor}; color:${isAdmin?'#000':'#fff'}; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:bold">${badgeText}</span>
-                    </div>
-                    `;
-                });
-            }
-            html += `</div>`;
-            html += `<button class="btn-main" style="background:#ccc; margin-top:10px" onclick="document.getElementById('modal').style.display='none'">إغلاق</button>`;
-            
-            b.innerHTML = html;
         });
+
+        // --- 4. نقل "النسخ الاحتياطي" إلى الحاوية الخاصة به ---
+        var backupPanel = document.querySelector('.backup-panel');
+        if (backupPanel) {
+            // إجبار الظهور (لأننا قد نكون أخفيناه سابقاً بكود آخر)
+            backupPanel.style.display = 'block'; 
+            backupPanel.style.visibility = 'visible';
+            backupBox.appendChild(backupPanel);
+        }
+
+        // --- 5. إنشاء أزرار القائمة الجديدة ---
+
+        // A. زر المالية
+        if (!document.getElementById('btnToggleFinance')) {
+            var btnFin = document.createElement('button');
+            btnFin.id = 'btnToggleFinance';
+            btnFin.className = 'menu-btn wide-btn';
+            btnFin.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+            btnFin.innerHTML = `<span style="font-size:1.4rem">💰</span> تفاصيل الديون والمصاريف`;
+            
+            btnFin.onclick = function() {
+                if (financeBox.style.display === 'none') {
+                    financeBox.style.display = 'block';
+                    btnFin.innerHTML = `🔼 إخفاء التفاصيل`;
+                    btnFin.style.background = '#475569';
+                    // إغلاق النسخ الاحتياطي إذا كان مفتوحاً لترتيب الشاشة
+                    if(backupBox.style.display !== 'none') document.getElementById('btnToggleBackup').click();
+                } else {
+                    financeBox.style.display = 'none';
+                    btnFin.innerHTML = `<span style="font-size:1.4rem">💰</span> تفاصيل الديون والمصاريف`;
+                    btnFin.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+                }
+            };
+            menu.appendChild(btnFin);
+        }
+
+        // B. زر النسخ الاحتياطي
+        if (!document.getElementById('btnToggleBackup')) {
+            var btnBak = document.createElement('button');
+            btnBak.id = 'btnToggleBackup';
+            btnBak.className = 'menu-btn wide-btn';
+            btnBak.style.background = 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)';
+            btnBak.innerHTML = `<span style="font-size:1.4rem">💾</span> النسخ الاحتياطي`;
+            
+            btnBak.onclick = function() {
+                if (backupBox.style.display === 'none') {
+                    backupBox.style.display = 'block';
+                    btnBak.innerHTML = `🔼 إخفاء النسخ الاحتياطي`;
+                    btnBak.style.background = '#475569';
+                    // إغلاق المالية إذا كانت مفتوحة
+                    if(financeBox.style.display !== 'none') document.getElementById('btnToggleFinance').click();
+                } else {
+                    backupBox.style.display = 'none';
+                    btnBak.innerHTML = `<span style="font-size:1.4rem">💾</span> النسخ الاحتياطي`;
+                    btnBak.style.background = 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)';
+                }
+            };
+            
+            // إضافة الزر فقط للأدمن (حماية إضافية)
+            var role = localStorage.getItem('masar_role') || '';
+            if (role === 'admin') {
+                menu.appendChild(btnBak);
+            }
+        }
     }
 
-    // تشغيل النظام
-    window.addEventListener('load', function(){
-        setTimeout(startPresenceSystem, 2000); // ابدأ تسجيل الحضور
-        setTimeout(showOnlineButton, 2500);    // أظهر الزر للأدمن
-    });
+    // تشغيل الكود مع تأخير بسيط لضمان اكتمال تحميل الصفحة
+    setTimeout(organizeDashboardUI, 800);
+    // تكرار المحاولة للتأكد
+    setTimeout(organizeDashboardUI, 2000);
 
 })();
 </script>
 
+<script>
+(function(){
+    function fixFinanceOrder() {
+        var box = document.getElementById('financeBox');
+        if (!box) return;
+
+        // دالة مساعدة للعثور على العناصر بناءً على النص أو المحتوى
+        function findHeader(text) {
+            var allHeaders = Array.from(box.querySelectorAll('.section-header'));
+            return allHeaders.find(h => h.innerText.includes(text));
+        }
+
+        function findRowById(idPart) {
+            var el = document.getElementById(idPart); // نبحث عن عنصر داخلي (مثلا رقم الدين)
+            if(el) return el.closest('.stats-row'); // نرجع السطر الكامل اللي يحتويه
+            return null;
+        }
+
+        // 1. تحديد العناصر (العناوين والصفوف)
+        var hDebt = findHeader('ديون');     // عنوان الديون
+        var rDebt = findRowById('dDay');    // سطر أرقام الديون
+
+        var hPay  = findHeader('تسديد');    // عنوان التسديد
+        var rPay  = findRowById('pDay');    // سطر أرقام التسديد
+
+        var hExp  = findHeader('المصاريف'); // عنوان المصاريف
+        var rExp  = findRowById('eDay');    // سطر أرقام المصاريف
+
+        var totals = box.querySelector('.total-summary'); // الإجماليات الكبيرة (الأشرطة الملونة)
+
+        // 2. إعادة الترتيب داخل الصندوق (Append ينقل العنصر للمكان الجديد)
+        
+        // أولاً: الديون
+        if(hDebt) { 
+            box.appendChild(hDebt); 
+            hDebt.style.marginTop = "10px"; // تجميل المسافات
+        }
+        if(rDebt) box.appendChild(rDebt);
+
+        // ثانياً: التسديد
+        if(hPay) {
+            box.appendChild(hPay);
+            hPay.style.marginTop = "20px"; // مسافة فاصلة
+        }
+        if(rPay) box.appendChild(rPay);
+
+        // ثالثاً: المصاريف
+        if(hExp) {
+            box.appendChild(hExp);
+            hExp.style.marginTop = "20px";
+        }
+        if(rExp) box.appendChild(rExp);
+
+        // أخيراً: الإجماليات
+        if(totals) {
+            box.appendChild(totals);
+            totals.style.marginTop = "25px";
+            totals.style.borderTop = "2px dashed #eee";
+            totals.style.paddingTop = "15px";
+        }
+    }
+
+    // تشغيل الترتيب مرتين للتأكد
+    setTimeout(fixFinanceOrder, 1000);
+    setTimeout(fixFinanceOrder, 2500);
+
+})();
+</script>
 
 </body>
 </html>
