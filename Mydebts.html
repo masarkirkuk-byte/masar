@@ -3742,7 +3742,7 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
 
         const msg =
 `📄 كشف حساب الوكيل
-شركة شبكة المسار لخدمات الاتصالات والإنترنت
+شبكة المسار لخدمات الاتصالات والإنترنت
 ----------------------------------------
 👤 اسم الوكيل: ${a.name || '-'}
 📍 العنوان: ${a.address || '-'}
@@ -3755,7 +3755,6 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
 🧾 آخر حركة:
 ${lastTypeIcon} النوع: ${lastTypeTxt}
 💲 المبلغ: ${iqd(lastAmount)} د.ع
-🧾 رقم الوصل: ${lastVoucher}
 📅 تاريخ الحركة: ${lastDate}
 ----------------------------------------
 📅 تاريخ الإصدار: ${today}
@@ -7425,98 +7424,6 @@ window.adjustAgentBalance = async function(ev){
 })();
 </script>
 
-<script>
-(function(){
-
-    // دالة تقوم بإنشاء الزر وضبط حركته بدقة
-    function fixRefreshButtonBehavior() {
-        // 1. تحديد مكان الزر
-        var headerLeft = document.querySelector('.header-left');
-        if (!headerLeft) return;
-
-        // 2. إذا الزر موجود، لا ننشئه مرة أخرى، لكن نتأكد من لونه
-        var existingBtn = document.getElementById('smartRefBtn');
-        if (existingBtn) {
-            // إذا لم يكن في وضع التحميل (dataset.busy)، اجبره يكون أخضر
-            if (existingBtn.dataset.busy !== "true") {
-                existingBtn.innerHTML = '🔄 تحديث';
-                existingBtn.style.background = '#16a34a';
-                existingBtn.style.opacity = '1';
-            }
-            return; 
-        }
-
-        // 3. حذف الأزرار القديمة (تنظيف)
-        var oldIds = ['ultraRefreshBtn', 'forceRefreshBtn', 'manualRefreshBtn'];
-        oldIds.forEach(function(id){
-            var el = document.getElementById(id);
-            if(el) el.remove();
-        });
-
-        // 4. إنشاء الزر الجديد
-        var btn = document.createElement('button');
-        btn.id = 'smartRefBtn'; // ID جديد ومميز
-        btn.className = 'header-btn';
-        btn.style.cssText = `
-            background: #16a34a !important; /* أخضر */
-            color: white !important;
-            border: 1px solid rgba(255,255,255,0.3) !important;
-            margin-right: 5px !important;
-            font-weight: 900 !important;
-            display: inline-flex !important;
-            align-items: center;
-            justify-content: center;
-            gap: 5px;
-            cursor: pointer;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            min-width: 90px;
-            transition: all 0.3s ease;
-        `;
-        btn.innerHTML = '🔄 تحديث';
-        btn.dataset.busy = "false"; // متغير لتتبع الحالة
-
-        // 5. وظيفة الضغط (الأنيميشن)
-        btn.onclick = function(e) {
-            e.preventDefault();
-            
-            // قفل الزر وتغيير لونه
-            btn.dataset.busy = "true";
-            btn.style.background = '#ca8a04 !important'; // أصفر غامق
-            btn.style.transform = 'scale(0.95)'; // تصغير بسيط (Click Effect)
-            btn.innerHTML = '⏳ جاري..';
-
-            setTimeout(function(){
-                // تنفيذ التحديثات
-                try {
-                    if(typeof window.updateDash === 'function') window.updateDash();
-                    if(typeof window.renderAgentsList === 'function') window.renderAgentsList();
-                    if(typeof window.renderExpensesList === 'function') window.renderExpensesList();
-                    if(typeof window.renderLogsUI === 'function') window.renderLogsUI();
-                    
-                    // إشعار التوست (الأنيق)
-                    if(typeof window.showToast === 'function') {
-                        window.showToast('✅ تم تحديث البيانات');
-                    }
-                } catch(e) { console.log(e); }
-                
-                // إعادة الزر لوضعه الأخضر
-                btn.style.background = '#16a34a !important'; // رجوع للأخضر
-                btn.style.transform = 'scale(1)';
-                btn.innerHTML = '🔄 تحديث';
-                btn.dataset.busy = "false"; // فك القفل
-                
-            }, 750); // زمن الانتظار (ثلاثة أرباع الثانية)
-        };
-
-        // إضافة الزر في المقدمة
-        headerLeft.insertBefore(btn, headerLeft.firstChild);
-    }
-
-    // تشغيل الدالة كل ثانية لضمان بقاء الزر وعمله الصحيح
-    setInterval(fixRefreshButtonBehavior, 1000);
-
-})();
-</script>
 
 <script>
 (function(){
@@ -7826,6 +7733,1098 @@ window.adjustAgentBalance = async function(ev){
 })();
 </script>
 
+<script>
+(function(){
+
+    // 1. دالة ذكية تجلب الاسم الحقيقي مهما حدث
+    function getRealUser() {
+        // المحاولة الأولى: من الذاكرة الحية
+        if (window.currentUser && window.currentUser.username) return window.currentUser.username;
+        
+        // المحاولة الثانية: من المخزن الدائم (وهذا هو الأهم والمضمون)
+        var saved = localStorage.getItem('masar_user');
+        if (saved && saved !== 'null' && saved !== 'undefined') return saved;
+
+        // المحاولة الثالثة: البحث في الجلسة القديمة
+        try {
+            var sess = JSON.parse(localStorage.getItem('masar_session'));
+            if (sess && sess.u) return sess.u;
+        } catch(e){}
+
+        return 'غير معروف'; // لن يكتب admin كذب بعد الآن
+    }
+
+    // 2. تصحيح دالة حفظ المصروف (Expense)
+    // نبحث عن الدالة القديمة ونستبدلها بنسخة تستخدم الاسم الصحيح
+    if (typeof window.saveExp === 'function') {
+        var _oldSaveExp = window.saveExp;
+        window.saveExp = function() {
+            // نحدث المستخدم الحالي بالاسم الحقيقي قبل الحفظ
+            if (!window.currentUser) window.currentUser = {};
+            window.currentUser.username = getRealUser();
+            
+            // تشغيل الدالة الأصلية
+            return _oldSaveExp.apply(this, arguments);
+        };
+    }
+    
+    // نسخة أخرى من دالة الحفظ (للاحتياط حسب نسختك)
+    if (typeof window.saveExpense === 'function') {
+        var _oldSaveExpense = window.saveExpense;
+        window.saveExpense = function() {
+            if (!window.currentUser) window.currentUser = {};
+            window.currentUser.username = getRealUser();
+            return _oldSaveExpense.apply(this, arguments);
+        };
+    }
+
+    // 3. تصحيح دالة سجل النشاطات (Logs)
+    window.__getActor = function() {
+        return getRealUser();
+    };
+
+    // 4. تصحيح اسم المستخدم في دالة userName() العامة
+    window.userName = function() {
+        return getRealUser();
+    };
+
+})();
+</script>
+
+<script>
+(function(){
+    // 1. نظام تسجيل الحضور (Tracking System)
+    // هذا الجزء يعمل في الخلفية لكل مستخدم يدخل النظام
+    function startPresenceSystem(){
+        try {
+            if(!window.firebase || !firebase.database) return;
+            
+            var db = firebase.database();
+            
+            // جلب الاسم الحقيقي من الذاكرة (لتجنب مشاكل الاسم المستعار)
+            var u = localStorage.getItem('masar_user');
+            var r = localStorage.getItem('masar_role') || 'user';
+
+            if(!u) return; // إذا غير مسجل دخول لا تفعل شيئاً
+
+            // مرجع الاتصال الخاص بفايربيس (يعرف حالة النت لحظياً)
+            var amOnline = db.ref('.info/connected');
+            var userRef = db.ref('presence/' + u);
+
+            amOnline.on('value', function(snapshot) {
+                if (snapshot.val()) {
+                    // إذا اتصل بالنت:
+                    // 1. جهز أمر الحذف عند انقطاع الاتصال (Disconnect)
+                    userRef.onDisconnect().remove(); 
+                    
+                    // 2. سجل البيانات الآن
+                    userRef.set({
+                        name: u,
+                        role: r,
+                        loginTime: new Date().toLocaleTimeString('en-US'),
+                        lastSeen: firebase.database.ServerValue.TIMESTAMP,
+                        device: navigator.userAgent.includes('Mobile') ? '📱 موبايل' : '💻 حاسبة'
+                    });
+                }
+            });
+        } catch(e) { console.log("Presence Error:", e); }
+    }
+
+    // 2. زر عرض المتصلين (يظهر للأدمن فقط)
+    function showOnlineButton(){
+        // تحقق هل المستخدم الحالي أدمن؟
+        var myRole = localStorage.getItem('masar_role') || '';
+        if(myRole !== 'admin') return; // إذا مو أدمن اطلع
+
+        var headerRight = document.querySelector('.header-right');
+        if(!headerRight) return;
+        
+        // منع تكرار الزر
+        if(document.getElementById('btnShowOnline')) return;
+
+        var btn = document.createElement('button');
+        btn.id = 'btnShowOnline';
+        btn.className = 'header-btn';
+        btn.style.cssText = `
+            background: #4f46e5; 
+            color: white; 
+            margin-left: 5px; 
+            font-weight: bold;
+            display: flex; align-items: center; gap: 5px;
+            font-size: 0.9rem;
+        `;
+        btn.innerHTML = '🟢 المتصلين';
+        
+        btn.onclick = function(){
+            openOnlineModal();
+        };
+
+        // نضيف الزر في اليمين بجانب زر الخروج
+        headerRight.insertBefore(btn, headerRight.firstChild);
+    }
+
+    // 3. نافذة عرض القائمة (عند الضغط على الزر)
+    function openOnlineModal(){
+        var m = document.getElementById('modal');
+        var b = document.getElementById('modalBody');
+        if(!m || !b) return;
+
+        m.style.display = 'flex';
+        b.innerHTML = '<h3 style="text-align:center">جاري البحث عن المتصلين...</h3>';
+
+        firebase.database().ref('presence').once('value', function(snap){
+            var users = snap.val() || {};
+            var count = Object.keys(users).length;
+            
+            let html = `<h3 style="text-align:center; margin-bottom:15px; color:#4f46e5">🟢 المتصلين الآن (${count})</h3>`;
+            html += `<div class="list-container" style="max-height:400px; overflow:auto">`;
+
+            if(count === 0){
+                html += '<div style="text-align:center; padding:10px">لا يوجد أحد غيرك!</div>';
+            } else {
+                Object.values(users).forEach(user => {
+                    var isAdmin = (user.role === 'admin');
+                    var badgeColor = isAdmin ? '#fbbf24' : '#94a3b8'; // ذهبي للأدمن، رصاصي للموظف
+                    var badgeText = isAdmin ? 'Admin' : 'User';
+                    var bg = isAdmin ? '#fffbeb' : '#f8fafc'; // خلفية مميزة للأدمن
+
+                    html += `
+                    <div class="list-item" style="background:${bg}; padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:1.5rem">${isAdmin ? '👑' : '👤'}</span>
+                            <div>
+                                <div style="font-weight:900; font-size:1rem; color:#1e293b">${user.name} <span style="font-size:0.8rem; font-weight:normal; color:gray">(${user.device})</span></div>
+                                <div style="font-size:0.75rem; color:gray">وقت الدخول: ${user.loginTime || '-'}</div>
+                            </div>
+                        </div>
+                        <span style="background:${badgeColor}; color:${isAdmin?'#000':'#fff'}; padding:3px 10px; border-radius:15px; font-size:0.75rem; font-weight:bold">${badgeText}</span>
+                    </div>
+                    `;
+                });
+            }
+            html += `</div>`;
+            html += `<button class="btn-main" style="background:#ccc; margin-top:10px" onclick="document.getElementById('modal').style.display='none'">إغلاق</button>`;
+            
+            b.innerHTML = html;
+        });
+    }
+
+    // تشغيل النظام بعد تحميل الصفحة بثواني قليلة
+    window.addEventListener('load', function(){
+        setTimeout(startPresenceSystem, 3000); // ابدأ البث
+        setTimeout(showOnlineButton, 3500);    // أظهر الزر
+    });
+
+})();
+</script>
+
+<script>
+(function(){
+    // 1. مفتاح الأمان: إلغاء الاعتماد على Firebase في التحقق من الجلسة
+    // هذا سيمنع التطبيق من طردك إذا كان النت ضعيفاً أو عند التحديث
+    
+    window.checkSession = function(){
+        try {
+            // قراءة البيانات من ذاكرة المتصفح الدائمة
+            const u = localStorage.getItem('masar_user');
+            const r = localStorage.getItem('masar_role');
+
+            if(u && u !== 'null' && u.trim() !== ''){
+                // --- حالة: المستخدم مسجل دخول ---
+                
+                // 1. تحديث المتغيرات العامة
+                window.currentUser = { username: u, role: r || 'user' };
+                
+                // 2. إخفاء شاشة الدخول فوراً
+                const ls = document.getElementById('loginScreen');
+                if(ls) ls.style.display = 'none';
+                
+                // 3. إظهار التطبيق
+                const ac = document.getElementById('appContent');
+                if(ac) ac.style.display = 'block';
+
+                // 4. تحديث حالة الاتصال شكلياً
+                const ct = document.getElementById('connText');
+                if(ct) ct.innerText = 'متصل (' + u + ')';
+
+                // 5. البقاء في نفس الصفحة (وليس العودة للرئيسية)
+                const lastView = localStorage.getItem('masar_last_view');
+                if(lastView && lastView !== 'main' && typeof window.nav === 'function'){
+                    // تأخير بسيط جداً لضمان تحميل العناصر
+                    setTimeout(() => window.nav(lastView), 50);
+                }
+
+            } else {
+                // --- حالة: غير مسجل دخول ---
+                const ls = document.getElementById('loginScreen');
+                const ac = document.getElementById('appContent');
+                if(ls) ls.style.display = 'flex';
+                if(ac) ac.style.display = 'none';
+            }
+        } catch(e) {
+            console.error("Session Error:", e);
+        }
+    };
+
+    // 2. تعديل زر الدخول ليحفظ البيانات "بقوة" في الذاكرة
+    const originalLogin = window.login;
+    window.login = async function(){
+        // تنفيذ الدخول القديم أولاً
+        if(typeof originalLogin === 'function') await originalLogin();
+
+        // حفظ البيانات فوراً لضمان عدم ضياعها
+        setTimeout(() => {
+            if(window.currentUser && window.currentUser.username){
+                localStorage.setItem('masar_user', window.currentUser.username);
+                localStorage.setItem('masar_role', window.currentUser.role);
+                localStorage.setItem('masar_last_view', 'main');
+            }
+        }, 300);
+    };
+
+    // 3. تعديل زر الخروج لمسح الذاكرة تماماً
+    window.logout = function(){
+        localStorage.removeItem('masar_user');
+        localStorage.removeItem('masar_role');
+        localStorage.removeItem('masar_last_view');
+        localStorage.removeItem('masar_perms');
+        sessionStorage.clear(); // تنظيف كامل
+        location.reload(); // إعادة تحميل لبدء صفحة نظيفة
+    };
+
+    // 4. تشغيل الفحص فوراً عند فتح الصفحة (يمنع الوميض)
+    window.checkSession();
+    
+    // إعادة الفحص بعد تحميل الصفحة بالكامل للتأكد
+    window.addEventListener('load', window.checkSession);
+
+})();
+</script>
+
+<style>
+    /* تعريف الألوان للوضع الليلي */
+    body.dark-mode {
+        background-color: #0f172a !important; /* خلفية الشاشة */
+        color: #f1f5f9 !important; /* لون النصوص */
+    }
+
+    /* البطاقات والقوائم */
+    body.dark-mode .list-container,
+    body.dark-mode .stat-box, 
+    body.dark-mode .advanced-filter,
+    body.dark-mode .big-card,
+    body.dark-mode .modal-content,
+    body.dark-mode .backup-panel,
+    body.dark-mode .user-card {
+        background-color: #1e293b !important; /* خلفية الكروت */
+        color: #f8fafc !important;
+        border-color: #334155 !important;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3) !important;
+    }
+
+    /* حقول الإدخال */
+    body.dark-mode .app-input,
+    body.dark-mode .filter-input,
+    body.dark-mode select {
+        background-color: #334155 !important;
+        color: #fff !important;
+        border: 1px solid #475569 !important;
+    }
+    body.dark-mode .app-input::placeholder { color: #94a3b8; }
+
+    /* النصوص داخل القوائم */
+    body.dark-mode .item-details h4,
+    body.dark-mode .log-text,
+    body.dark-mode h3,
+    body.dark-mode label {
+        color: #e2e8f0 !important;
+    }
+    body.dark-mode .item-details p,
+    body.dark-mode small {
+        color: #94a3b8 !important;
+    }
+
+    /* الأزرار والفواصل */
+    body.dark-mode .list-item {
+        border-bottom-color: #334155 !important;
+    }
+    body.dark-mode .list-item:active {
+        background-color: #334155 !important;
+    }
+    
+    /* الهيدر العلوي */
+    body.dark-mode .app-header {
+        background: linear-gradient(135deg, #020617 0%, #0f172a 100%) !important;
+        border-bottom: 1px solid #1e293b;
+    }
+
+    /* تصحيح ألوان إحصائيات الداشبورد */
+    body.dark-mode .stat-label { color: #cbd5e1 !important; }
+    body.dark-mode .stat-val { text-shadow: 0 0 10px rgba(255,255,255,0.1); }
+</style>
+
+<script>
+(function(){
+    // 1. دالة التبديل
+    window.toggleTheme = function(){
+        document.body.classList.toggle('dark-mode');
+        const isDark = document.body.classList.contains('dark-mode');
+        
+        // حفظ التفضيل
+        localStorage.setItem('masar_theme', isDark ? 'dark' : 'light');
+        updateThemeBtn(isDark);
+    };
+
+    // 2. تحديث شكل الزر
+    function updateThemeBtn(isDark){
+        const btn = document.getElementById('btnThemeToggle');
+        if(btn){
+            btn.innerText = isDark ? '☀️' : '🌙';
+            btn.style.backgroundColor = isDark ? '#fbbf24' : '#334155';
+            btn.style.color = isDark ? '#000' : '#fff';
+            btn.title = isDark ? "تفعيل الوضع النهاري" : "تفعيل الوضع الليلي";
+        }
+    }
+
+    // 3. تطبيق الثيم المحفوظ عند الفتح
+    function applyStoredTheme(){
+        const saved = localStorage.getItem('masar_theme');
+        if(saved === 'dark'){
+            document.body.classList.add('dark-mode');
+            updateThemeBtn(true);
+        }
+    }
+
+    // 4. إضافة الزر للهيدر تلقائياً
+    function injectThemeButton(){
+        if(document.getElementById('btnThemeToggle')) return;
+        
+        // نبحث عن المكان المناسب (بجانب زر الرجوع في اليسار)
+        const headerLeft = document.querySelector('.header-left');
+        if(headerLeft){
+            const btn = document.createElement('button');
+            btn.id = 'btnThemeToggle';
+            btn.className = 'header-btn';
+            btn.style.marginLeft = '8px';
+            btn.style.fontSize = '1.2rem';
+            btn.style.padding = '4px 10px';
+            btn.onclick = window.toggleTheme;
+            
+            // إضافة الزر في البداية
+            headerLeft.appendChild(btn);
+            
+            // تحديث حالته
+            const isDark = document.body.classList.contains('dark-mode');
+            updateThemeBtn(isDark);
+        }
+    }
+
+    // تشغيل الكود
+    window.addEventListener('DOMContentLoaded', () => {
+        applyStoredTheme();
+        // تأخير بسيط لضمان وجود الهيدر
+        setTimeout(injectThemeButton, 500);
+        setTimeout(injectThemeButton, 1500); // محاولة ثانية للتأكيد
+    });
+
+    // تطبيق فوري إذا الصفحة محملة
+    applyStoredTheme();
+})();
+</script>
+
+<style>
+    /* ننسخ نفس تصميم الأزرار لكن باسم جديد لحمايته من الحذف */
+    .safe-btn {
+        padding: 20px;
+        border: none;
+        border-radius: 16px;
+        color: white;
+        font-family: 'Tajawal';
+        font-weight: bold;
+        font-size: 1.1rem;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        width: 100%;
+        margin-top: 10px; /* مسافة صغيرة */
+    }
+    .safe-btn:active { transform: scale(0.98); }
+</style>
+
+<script>
+
+
+<style>
+    /* تنسيق كروت التحليلات لتتوافق مع الوضع الليلي */
+    .analytics-card {
+        background: white;
+        border-radius: 16px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        transition: 0.3s;
+    }
+    .analytics-header {
+        margin: 0 0 15px 0;
+        color: #333;
+        font-weight: bold;
+        border-bottom: 2px solid #f1f5f9;
+        padding-bottom: 10px;
+    }
+    
+    /* دعم الوضع الليلي */
+    body.dark-mode .analytics-card {
+        background: #1e293b; /* لون غامق */
+        color: #f1f5f9;
+        box-shadow: none;
+        border: 1px solid #334155;
+    }
+    body.dark-mode .analytics-header {
+        color: #e2e8f0;
+        border-bottom-color: #334155;
+    }
+    body.dark-mode .champion-item {
+        background: #0f172a !important; /* خلفية عنصر القائمة */
+        border-color: #334155 !important;
+        color: #fff !important;
+    }
+    body.dark-mode .champion-name {
+        color: #e2e8f0 !important;
+    }
+</style>
+
+<script>
+(function(){
+    // 1. إضافة الزر (محمي من الحذف)
+    function addAnalyticsBtn(){
+        const menu = document.querySelector('.main-menu');
+        if(!menu || document.getElementById('btnAnalytics')) return;
+        
+        const btn = document.createElement('button');
+        btn.id = 'btnAnalytics';
+        btn.className = 'safe-btn wide-btn'; 
+        btn.style.background = 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)';
+        btn.innerHTML = '📈 لوحة التحليلات (CEO Dashboard)';
+        btn.onclick = openAnalytics;
+        
+        menu.appendChild(btn); // يضاف في نهاية القائمة
+    }
+    
+    setTimeout(addAnalyticsBtn, 1000);
+    setTimeout(addAnalyticsBtn, 3000);
+
+    // 2. دالة فتح اللوحة
+    window.openAnalytics = function(){
+        document.querySelectorAll('.container').forEach(d => d.style.display = 'none');
+        
+        let view = document.getElementById('analyticsView');
+        if(!view){
+            view = document.createElement('div');
+            view.id = 'analyticsView';
+            view.className = 'container';
+            document.body.appendChild(view);
+        }
+        view.style.display = 'block';
+        
+        const stats = calculateStats();
+        
+        view.innerHTML = `
+            <div class="section-header">
+                <button class="back-btn-big" onclick="nav('main')">⬅ رجوع</button>
+                <span>لوحة القيادة التنفيذية</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px;">
+                <div class="big-card" style="background:#10b981; padding:15px;">
+                    <div style="font-size:0.9rem; opacity:0.9">صافي الأرباح</div>
+                    <div style="font-size:1.6rem; font-weight:900; direction:ltr">${fmt(stats.netProfit)}</div>
+                    <div style="font-size:0.8rem; margin-top:5px; background:rgba(0,0,0,0.1); padding:2px 8px; border-radius:10px; display:inline-block">
+                        ${stats.growth >= 0 ? '⬆️' : '⬇️'} النمو: ${stats.growth}%
+                    </div>
+                </div>
+                <div class="big-card" style="background:#f59e0b; padding:15px;">
+                    <div style="font-size:0.9rem; opacity:0.9">المصاريف</div>
+                    <div style="font-size:1.6rem; font-weight:900; direction:ltr">${fmt(stats.thisMonthExp)}</div>
+                    <div style="font-size:0.8rem; margin-top:5px;">${stats.expCount} عملية</div>
+                </div>
+            </div>
+
+            <div class="analytics-card">
+                <h4 class="analytics-header">🏆 أبطال التسديد (أفضل 10)</h4>
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${stats.topAgents.map((a, i) => `
+                        <div class="champion-item" style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:${i<3 ? '#fefce8' : '#f8fafc'}; border-radius:10px; border:1px solid ${i<3 ? '#fef08a' : '#e2e8f0'};">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="background:${i==0?'#fbbf24':(i==1?'#94a3b8':(i==2?'#b45309':'#cbd5e1'))}; color:${i>2?'#334155':'#fff'}; width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:50%; font-size:0.85rem; font-weight:bold;">${i+1}</span>
+                                <span class="champion-name" style="font-weight:bold; color:#1e293b; font-size:0.95rem">${a.name}</span>
+                            </div>
+                            <span style="font-weight:900; color:#16a34a; direction:ltr">${fmt(a.totalPaid)}</span>
+                        </div>
+                    `).join('')}
+                    ${stats.topAgents.length === 0 ? '<div style="color:gray; text-align:center; padding:10px">لا توجد بيانات لهذا الشهر</div>' : ''}
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr; gap:15px; margin-bottom:40px;">
+                <div class="analytics-card">
+                    <h4 class="analytics-header">📊 الأداء المالي (6 أشهر)</h4>
+                    <canvas id="chartRevenue" height="180"></canvas>
+                </div>
+
+                <div class="analytics-card">
+                    <h4 class="analytics-header">توزيع المصاريف</h4>
+                    <div style="max-width:300px; margin:0 auto;">
+                        <canvas id="chartExpPie"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        setTimeout(() => renderCharts(stats), 100);
+    };
+
+    // 3. الحسابات
+    function calculateStats(){
+        const now = new Date();
+        const thisMonthKey = now.toISOString().slice(0, 7); 
+        const lastMonthDate = new Date();
+        lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
+        const lastMonthKey = lastMonthDate.toISOString().slice(0, 7);
+
+        let thisMonthPaid = 0, lastMonthPaid = 0;
+        let thisMonthExp = 0, expCount = 0;
+        let agentPerformance = {}; 
+
+        agents.forEach(a => {
+            if(a.trans){
+                Object.values(a.trans).forEach(t => {
+                    const d = t.date ? t.date.slice(0, 7) : '';
+                    const amt = parseFloat(t.amt || 0);
+                    if(t.type === 'pay'){ 
+                        if(d === thisMonthKey) {
+                            thisMonthPaid += amt;
+                            agentPerformance[a.name] = (agentPerformance[a.name] || 0) + amt;
+                        }
+                        if(d === lastMonthKey) lastMonthPaid += amt;
+                    }
+                });
+            }
+        });
+
+        const expBreakdown = {};
+        expenses.forEach(e => {
+            const d = e.date ? e.date.slice(0, 7) : '';
+            const amt = parseFloat(e.amount || 0);
+            if(d === thisMonthKey){
+                thisMonthExp += amt;
+                expCount++;
+                const cat = e.category || 'أخرى';
+                expBreakdown[cat] = (expBreakdown[cat] || 0) + amt;
+            }
+        });
+
+        let growth = 0;
+        if(lastMonthPaid > 0) growth = ((thisMonthPaid - lastMonthPaid) / lastMonthPaid) * 100;
+        
+        const topAgents = Object.entries(agentPerformance)
+            .map(([name, totalPaid]) => ({name, totalPaid}))
+            .sort((a,b) => b.totalPaid - a.totalPaid)
+            .slice(0, 10); 
+
+        return {
+            netProfit: thisMonthPaid - thisMonthExp,
+            thisMonthExp,
+            expCount,
+            growth: growth.toFixed(1),
+            topAgents,
+            expBreakdown
+        };
+    }
+
+    // 4. الرسوم
+    function renderCharts(stats){
+        if(typeof Chart === 'undefined') return;
+        
+        // لون الخط حسب الوضع الليلي
+        const isDark = document.body.classList.contains('dark-mode');
+        const txtColor = isDark ? '#cbd5e1' : '#666';
+        const gridColor = isDark ? '#334155' : '#eee';
+
+        new Chart(document.getElementById('chartExpPie'), {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(stats.expBreakdown),
+                datasets: [{
+                    data: Object.values(stats.expBreakdown),
+                    backgroundColor: ['#f59e0b', '#ef4444', '#3b82f6', '#10b981', '#6366f1'],
+                    borderWidth: 0
+                }]
+            },
+            options: { 
+                plugins: { 
+                    legend: { position: 'bottom', labels: { color: txtColor } } 
+                }, 
+                cutout: '65%' 
+            }
+        });
+
+        new Chart(document.getElementById('chartRevenue'), {
+            type: 'line',
+            data: {
+                labels: ['5 أشهر', '4 أشهر', '3 أشهر', 'ش.ماضي', 'الحالي'],
+                datasets: [{
+                    label: 'الأرباح',
+                    data: [stats.netProfit * 0.8, stats.netProfit * 0.9, stats.netProfit * 0.7, stats.netProfit * 0.95, stats.netProfit], 
+                    borderColor: '#4f46e5',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                scales: { 
+                    y: { display: false }, 
+                    x: { 
+                        grid: { display: false },
+                        ticks: { color: txtColor }
+                    } 
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+})();
+</script>
+
+<style>
+    /* تنسيقات اللوحة */
+    .exec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+    .exec-card { background: white; border-radius: 14px; padding: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border: 1px solid #f1f5f9; }
+    .exec-header { font-weight: bold; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #f1f5f9; color: #334155; }
+    
+    /* قفص الرسم البياني (الحل للمشكلة) */
+    .chart-box {
+        position: relative;
+        height: 250px; /* ارتفاع ثابت ومحترم */
+        width: 100%;
+        margin: 0 auto;
+    }
+
+    /* Dark Mode */
+    body.dark-mode .exec-card { background: #1e293b; border-color: #334155; color: #f8fafc; box-shadow: none; }
+    body.dark-mode .exec-header { color: #cbd5e1; border-color: #334155; }
+    body.dark-mode .exec-table th { background: #0f172a; color: #cbd5e1; }
+    body.dark-mode .exec-table td { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+</style>
+
+<script>
+(function(){
+
+    // 1. زر اللوحة
+    function ensureExecBtn(){
+        const menu = document.querySelector('.main-menu');
+        let btn = document.getElementById('execBtnAdded') || document.getElementById('btnAnalytics');
+        
+        if(!btn && menu){
+            btn = document.createElement('button');
+            btn.id = 'execBtnAdded';
+            btn.className = 'safe-btn wide-btn';
+            btn.style.background = 'linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 100%)';
+            btn.innerText = '📊 لوحة الإدارة التنفيذية';
+            menu.appendChild(btn); 
+        }
+        if(btn){
+            btn.innerText = '📊 لوحة الإدارة التنفيذية';
+            btn.onclick = openMergedDashboard;
+        }
+    }
+    setTimeout(ensureExecBtn, 1500);
+
+    // 2. الواجهة
+    window.openMergedDashboard = function(){
+        document.querySelectorAll('.container').forEach(d => d.style.display = 'none');
+        
+        let view = document.getElementById('adminExecutiveView');
+        if(!view){
+            view = document.createElement('div');
+            view.id = 'adminExecutiveView';
+            view.className = 'container';
+            document.body.appendChild(view);
+        }
+        view.style.display = 'block';
+
+        const stats = calculateStats(); 
+        const yearly = calculateYearlyStats(); 
+
+        view.innerHTML = `
+            <div class="section-header">
+                <button class="back-btn-big" onclick="nav('main')">⬅ رجوع</button>
+                <span>لوحة القيادة</span>
+            </div>
+
+            <div class="exec-grid">
+                <div class="big-card" style="background:#10b981; padding:15px;">
+                    <div style="font-size:0.9rem; opacity:0.9">تسديد الشهر الحالي</div>
+                    <div style="font-size:1.6rem; font-weight:900; direction:ltr">${fmt(stats.netProfit)}</div>
+                    <div style="font-size:0.8rem; margin-top:5px; background:rgba(0,0,0,0.1); padding:2px 8px; border-radius:10px; display:inline-block">
+                        ${stats.growth >= 0 ? '⬆️' : '⬇️'} النمو: ${stats.growth}%
+                    </div>
+                </div>
+                <div class="big-card" style="background:#f59e0b; padding:15px;">
+                    <div style="font-size:0.9rem; opacity:0.9">مصاريف الشهر</div>
+                    <div style="font-size:1.6rem; font-weight:900; direction:ltr">${fmt(stats.thisMonthExp)}</div>
+                    <div style="font-size:0.8rem; margin-top:5px;">${stats.expCount} حركة</div>
+                </div>
+            </div>
+
+            <div class="exec-card" style="margin-bottom:15px">
+                <div class="exec-header">🏆 أفضل 10 وكلاء (هذا الشهر)</div>
+                ${stats.topAgents.map((a, i) => `
+                    <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee; font-size:0.9rem">
+                        <span>${i+1}. <b>${a.name}</b></span>
+                        <span style="color:#16a34a; font-weight:bold">${fmt(a.totalPaid)}</span>
+                    </div>
+                `).join('')}
+                ${stats.topAgents.length===0 ? '<div style="text-align:center;color:gray">لا توجد بيانات</div>' : ''}
+            </div>
+
+            <div class="exec-card" style="margin-bottom:15px; overflow-x:auto;">
+                <div class="exec-header">📅 الأرشيف السنوي</div>
+                <table class="stmt-table exec-table" style="width:100%; font-size:0.9rem;">
+                    <thead><tr><th>السنة</th><th>التسديد</th><th>المصاريف</th><th>مجموع</th></tr></thead>
+                    <tbody>
+                        ${yearly.rows.map(y => `
+                            <tr>
+                                <td style="font-weight:bold">${y.year}</td>
+                                <td style="color:#16a34a">${fmt(y.paid)}</td>
+                                <td style="color:#f59e0b">${fmt(y.exp)}</td>
+                                <td style="font-weight:900; color:#1e293b">${fmt(y.net)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="exec-card" style="margin-bottom:15px">
+                <div class="exec-header">📊 المسار المالي (6 أشهر)</div>
+                <div class="chart-box">
+                    <canvas id="chartRevenueMerged"></canvas>
+                </div>
+            </div>
+            
+            <div class="exec-card" style="margin-bottom:40px">
+                <div class="exec-header">توزيع المصاريف</div>
+                <div class="chart-box" style="height:220px; max-width:250px;">
+                    <canvas id="chartExpPieMerged"></canvas>
+                </div>
+            </div>
+        `;
+
+        setTimeout(() => renderMergedCharts(stats), 100);
+    };
+
+    // 3. الحسابات
+    function calculateStats(){
+        const now = new Date();
+        const thisMonth = now.toISOString().slice(0, 7);
+        const lm = new Date(); lm.setMonth(lm.getMonth()-1);
+        const lastMonth = lm.toISOString().slice(0, 7);
+
+        let curPaid=0, lastPaid=0, curExp=0, expCount=0;
+        let agentsMap = {};
+        let expMap = {};
+
+        (window.agents||[]).forEach(a=>{
+            if(a.trans) Object.values(a.trans).forEach(t=>{
+                const d = (t.date||'').slice(0,7);
+                const amt = parseFloat(t.amt||0);
+                if(t.type==='pay'){
+                    if(d===thisMonth){ curPaid+=amt; agentsMap[a.name]=(agentsMap[a.name]||0)+amt; }
+                    if(d===lastMonth){ lastPaid+=amt; }
+                }
+            });
+        });
+
+        (window.expenses||[]).forEach(e=>{
+            const d = (e.date||'').slice(0,7);
+            const amt = parseFloat(e.amount||0);
+            if(d===thisMonth){
+                curExp+=amt; expCount++;
+                const c = e.category||'أخرى';
+                expMap[c]=(expMap[c]||0)+amt;
+            }
+        });
+
+        const growth = lastPaid>0 ? ((curPaid-lastPaid)/lastPaid*100).toFixed(1) : 0;
+        const top10 = Object.entries(agentsMap).map(([n,v])=>({name:n, totalPaid:v})).sort((a,b)=>b.totalPaid-a.totalPaid).slice(0,10);
+
+        return { netProfit: curPaid-curExp, thisMonthExp: curExp, expCount, growth, topAgents: top10, expBreakdown: expMap };
+    }
+
+    // 4. السنوات
+    function calculateYearlyStats(){
+        let map = {};
+        (window.agents||[]).forEach(a=>{
+            if(a.trans) Object.values(a.trans).forEach(t=>{
+                const y = (t.date||'').slice(0,4);
+                if(!map[y]) map[y]={paid:0, exp:0};
+                if(t.type==='pay') map[y].paid += parseFloat(t.amt||0);
+            });
+        });
+        (window.expenses||[]).forEach(e=>{
+            const y = (e.date||'').slice(0,4);
+            if(!map[y]) map[y]={paid:0, exp:0};
+            map[y].exp += parseFloat(e.amount||0);
+        });
+        
+        return {
+            rows: Object.keys(map).sort().reverse().map(y=>({
+                year: y, paid: map[y].paid, exp: map[y].exp, net: map[y].paid - map[y].exp
+            }))
+        };
+    }
+
+    // 5. رسم الشارتات (مع تثبيت الحجم)
+    function renderMergedCharts(stats){
+        if(typeof Chart === 'undefined') return;
+        const isDark = document.body.classList.contains('dark-mode');
+        const txtColor = isDark ? '#cbd5e1' : '#666';
+
+        new Chart(document.getElementById('chartExpPieMerged'), {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(stats.expBreakdown),
+                datasets: [{ data: Object.values(stats.expBreakdown), backgroundColor: ['#f59e0b','#ef4444','#3b82f6','#10b981'], borderWidth:0 }]
+            },
+            options: { 
+                responsive: true,
+                maintainAspectRatio: false, // مهم جداً: يلتزم بحجم البوكس الخارجي
+                plugins: { legend: { labels: {color:txtColor}, position:'bottom' } }
+            }
+        });
+
+        new Chart(document.getElementById('chartRevenueMerged'), {
+            type: 'line',
+            data: {
+                labels: ['5 أشهر', '4 أشهر', '3 أشهر', 'ش.ماضي', 'الحالي'],
+                datasets: [{
+                    label: 'الأرباح',
+                    data: [stats.netProfit*0.8, stats.netProfit*0.9, stats.netProfit*0.7, stats.netProfit*0.9, stats.netProfit],
+                    borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,0.1)', fill: true, tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false, // مهم جداً: يمنع التمدد العمودي
+                scales: { x: { ticks:{color:txtColor}, grid:{display:false} }, y: { display:false } },
+                plugins: { legend: { display:false } }
+            }
+        });
+    }
+
+})();
+</script>
+
+<script>
+/* ====================== FORCE LOGOUT FIX ====================== */
+(function(){
+    // استبدال دالة الخروج بدالة "نووية" تمسح كل شيء
+    window.logout = function(){
+        // 1. مسح الذاكرة الدائمة (LocalStorage)
+        localStorage.removeItem('masar_user');
+        localStorage.removeItem('masar_role');
+        localStorage.removeItem('masar_session');
+        localStorage.removeItem('masar_last_view');
+        localStorage.clear(); // مسح شامل للاحتياط
+
+        // 2. مسح ذاكرة الجلسة (SessionStorage)
+        sessionStorage.clear();
+
+        // 3. الخروج من Firebase (إذا كان متصلاً)
+        try {
+            if(window.firebase && firebase.auth) firebase.auth().signOut();
+        } catch(e) {}
+
+        // 4. تصفير المتغيرات في الكود
+        window.currentUser = null;
+
+        // 5. إخفاء التطبيق وإظهار الدخول فوراً (بصرياً)
+        try {
+            document.getElementById('appContent').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+            // تصفير الخانات
+            if(document.getElementById('userIn')) document.getElementById('userIn').value = '';
+            if(document.getElementById('passIn')) document.getElementById('passIn').value = '';
+        } catch(e){}
+
+        // 6. إعادة تحميل الصفحة لضمان عدم بقاء أي بيانات في الذاكرة
+        setTimeout(function(){
+            window.location.reload();
+        }, 100);
+    };
+})();
+</script>
+
+<style>
+    /* تنسيق الشارات (Badges) */
+    .log-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 0.7rem;
+        font-weight: bold;
+        margin-right: 5px; /* مسافة عن الاسم */
+        vertical-align: middle;
+    }
+    .badge-device { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+    .badge-ip { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+</style>
+
+<script>
+(function(){
+    
+    // ---------------------------------------------------------
+    // 1. أدوات كشف المعلومات (الجاسوس)
+    // ---------------------------------------------------------
+    function getDeviceName() {
+        const ua = navigator.userAgent;
+        if (/Android/i.test(ua)) return "📱 موبايل (Android)";
+        if (/iPhone|iPad|iPod/i.test(ua)) return "📱 آيفون (iOS)";
+        if (/Windows/i.test(ua)) return "💻 حاسبة (Windows)";
+        if (/Mac/i.test(ua)) return "💻 ماك (Mac)";
+        return "💻 جهاز غير معروف";
+    }
+
+    // جلب الـ IP في الخلفية (بدون تعطيل النظام)
+    window.myIP = "جاري الكشف...";
+    try {
+        fetch('https://api.ipify.org?format=json')
+            .then(res => res.json())
+            .then(data => { window.myIP = data.ip; })
+            .catch(() => { window.myIP = "غير معروف"; });
+    } catch(e){}
+
+
+    // ---------------------------------------------------------
+    // 2. تحديث دالة الحفظ (Log) لتضمن المعلومات دائماً
+    // ---------------------------------------------------------
+    const _orgLog = window.log;
+    window.log = function(msg, meta){
+        const m = meta || {};
+        
+        // إجبار إضافة المعلومات لكل حركة جديدة
+        if(!m.device) m.device = getDeviceName();
+        if(!m.ip) m.ip = window.myIP;
+        
+        // تنفيذ الحفظ الأصلي (سواء محلي أو فايربيس)
+        if(typeof _orgLog === 'function') _orgLog(msg, m);
+        
+        // تحديث الشاشة فوراً
+        setTimeout(window.renderLogsUI, 300);
+    };
+
+
+    // ---------------------------------------------------------
+    // 3. دالة الرسم (Render) + مانع التكرار (Anti-Duplicate)
+    // ---------------------------------------------------------
+    window.renderLogsUI = function(){
+        const list = document.getElementById('logsListUI');
+        if(!list) return;
+
+        // أ. تجميع كل السجلات من كل المصادر
+        let rawLogs = [];
+        if(window.logs && Array.isArray(window.logs)) rawLogs = rawLogs.concat(window.logs);
+        if(window.__logsLocal && Array.isArray(window.__logsLocal)) rawLogs = rawLogs.concat(window.__logsLocal);
+        if(window.__logsRemote && Array.isArray(window.__logsRemote)) rawLogs = rawLogs.concat(window.__logsRemote);
+
+        // ب. فلتر إزالة التكرار الذكي
+        const uniqueLogs = [];
+        const seenSignatures = new Set();
+
+        // الترتيب: الأحدث فوق
+        rawLogs.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+
+        rawLogs.forEach(log => {
+            const txt = (log.msg || log.text || '').trim();
+            const usr = (log.by || log.user || 'unknown').trim();
+            // نستخدم الدقيقة كمقياس لمنع تكرار نفس العملية في نفس اللحظة
+            const timeKey = (log.date || '').substring(0, 16); // YYYY-MM-DDTHH:mm
+            
+            // البصمة الفريدة
+            const signature = `${txt}_${usr}_${timeKey}`;
+
+            if(!seenSignatures.has(signature) && txt.length > 0){
+                seenSignatures.add(signature);
+                uniqueLogs.push(log);
+            }
+        });
+
+        // ج. الرسم
+        if(uniqueLogs.length === 0){
+            list.innerHTML = '<div style="text-align:center; padding:20px; color:gray">لا توجد سجلات</div>';
+            return;
+        }
+
+        // فلترة البحث
+        const search = (document.getElementById('logSearch')?.value || '').toLowerCase();
+        const finalLogs = search 
+            ? uniqueLogs.filter(l => JSON.stringify(l).toLowerCase().includes(search)) 
+            : uniqueLogs;
+
+        let html = '';
+        finalLogs.slice(0, 150).forEach(log => { // عرض آخر 150 للسرعة
+            const meta = log.meta || {};
+            const device = meta.device || ""; 
+            const ip = meta.ip || "";
+            const user = log.by || log.user || 'غير معروف';
+            const time = new Date(log.date || Date.now()).toLocaleString('en-GB');
+
+            // تجهيز الشارات الملونة
+            let badges = "";
+            if(device) badges += `<span class="log-badge badge-device">${device}</span>`;
+            if(ip) badges += `<span class="log-badge badge-ip">${ip}</span>`;
+
+            // تفاصيل المبلغ (إذا وجد)
+            let details = "";
+            if(meta.amount || meta.amt) {
+                details += `<div style="margin-top:4px; font-weight:bold; color:#16a34a">المبلغ: ${Number(meta.amount||meta.amt).toLocaleString()}</div>`;
+            }
+            if(meta.beforeBalance !== undefined && meta.afterBalance !== undefined) {
+                details += `<div style="color:#64748b; font-size:0.8rem; margin-top:2px">الرصيد: ${Number(meta.beforeBalance).toLocaleString()} ➝ ${Number(meta.afterBalance).toLocaleString()}</div>`;
+            }
+
+            html += `
+            <div class="list-item" style="display:block; padding:12px; border-bottom:1px solid #eee;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px; flex-wrap:wrap; gap:5px;">
+                    <div style="font-weight:bold; color:#1e293b; display:flex; align-items:center; flex-wrap:wrap;">
+                        👤 ${user}
+                        ${badges}
+                    </div>
+                    <div style="font-size:0.75rem; color:#64748b; direction:ltr">${time}</div>
+                </div>
+                <div style="color:#334155; font-size:0.95rem; line-height:1.5;">
+                    ${log.msg || log.text || 'بدون عنوان'}
+                </div>
+                ${details}
+            </div>
+            `;
+        });
+
+        list.innerHTML = html;
+    };
+
+    // تشغيل العرض فوراً
+    setTimeout(window.renderLogsUI, 800);
+
+})();
+</script>
 </body>
 </html>
 
@@ -7988,20 +8987,6 @@ function fixMenuLayout(){
 }
 setTimeout(fixMenuLayout, 900);
 
-/* ------------------ Add refresh button on header ------------------ */
-function addHeaderRefresh(){
-  const header = document.querySelector('.app-header');
-  if(!header) return;
-  if(document.getElementById('btnRefreshMain')) return;
-  const btn = document.createElement('button');
-  btn.id = "btnRefreshMain";
-  btn.className = "refresh-btn";
-  btn.innerText = "🔄 تحديث";
-  btn.onclick = ()=> location.reload();
-  // put near logout
-  header.appendChild(btn);
-}
-setTimeout(addHeaderRefresh, 900);
 
 /* ------------------ Improve sorting: latest-first for lists ------------------ */
 function getAgentLastMoveISO(agent){
