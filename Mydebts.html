@@ -2569,30 +2569,7 @@ window.renderExpensesList = function(){
         editingUser = null;
     }
 
-    function saveAgent() {
-        // حفظ/تعديل الوكيل (اسم/هاتف/عنوان/ملاحظات)
-        if(!canManageAgents()) return alert("عذراً، لا تملك صلاحية تعديل الوكلاء");
-        const n = (document.getElementById('inAgName').value || '').trim(); if(!n) return alert("الاسم مطلوب");
-        const ph = (document.getElementById('inAgPhone').value || '').trim();
-        const ad = (document.getElementById('inAgAddr').value || '').trim();
-        const nt = (document.getElementById('inAgNote').value || '').trim();
-
-        if(editId) {
-            // تحديث بيانات الوكيل فقط بدون لمس الحركات
-            db.ref('agents/' + editId).update({name:n, phone:ph, address:ad, note:nt, updatedAt:new Date().toISOString()}).then(() => {
-                updateAgentsUI();
-                window.__vipLog(`عدل وكيل: ${n}`, {action:'update_agent', agentId: editId, agentName:n});
-            });
-} else {
-            const id = genId();
-            db.ref('agents/' + id).set({id:id, name:n, phone:ph, address:ad, note:nt, createdAt:new Date().toISOString(), trans:{}}).then(() => {
-                updateAgentsUI();
-                window.__vipLog(`أضاف وكيل: ${n}`, {action:'create_agent', agentId:id, agentName:n});
-            });
-}
-        closeModal();
-    }
-
+   
 
     
     function saveExp(){
@@ -2768,21 +2745,90 @@ function openNewExpense(){
         }
         closeModal();
     }
-
-    function editAgent(id, e) {
+function editAgent(id, e) {
         e.stopPropagation();
         if(!canManageAgents()) return alert("عذراً، لا تملك صلاحية تعديل الوكلاء");
+        
         const a = agents.find(x => x.id == id);
+        if(!a) return;
+        
+        // تثبيت المعرف لضمان عدم ضياعه أثناء التعديل
         editId = id;
+        window.editId = id; 
+        
         openModal('agent');
+        
         setTimeout(() => {
-            document.getElementById('inAgName').value = a.name;
-            document.getElementById('inAgPhone').value = a.phone;
-            document.getElementById('inAgAddr').value = a.address;
-            document.getElementById('inAgNote').value = a.note||'';
+            // تغيير عنوان النافذة ليكون "تعديل" بدلاً من "جديد"
+            const titleEl = document.querySelector('#modalBody h3');
+            if(titleEl) titleEl.innerText = 'تعديل بيانات الوكيل';
+            
+            // تعبئة البيانات القديمة في الخانات
+            document.getElementById('inAgName').value = a.name || '';
+            document.getElementById('inAgPhone').value = a.phone || '';
+            document.getElementById('inAgAddr').value = a.address || '';
+            document.getElementById('inAgNote').value = a.note || a.notes || '';
         }, 100);
     }
 
+    function saveAgent() {
+        if(!canManageAgents()) return alert("عذراً، لا تملك صلاحية تعديل الوكلاء");
+        
+        const n = (document.getElementById('inAgName').value || '').trim(); 
+        if(!n) return alert("الاسم مطلوب");
+        
+        const ph = (document.getElementById('inAgPhone').value || '').trim();
+        const ad = (document.getElementById('inAgAddr').value || '').trim();
+        const nt = (document.getElementById('inAgNote').value || '').trim();
+
+        // سحب المعرف من المتغيرات
+        let targetId = editId || window.editId;
+
+        if (targetId) {
+            // 1. تحديث محلي فوري (لتتغير البيانات على الشاشة بدون رفرش)
+            let ag = agents.find(x => x.id == targetId);
+            if (ag) {
+                ag.name = n;
+                ag.phone = ph;
+                ag.address = ad;
+                ag.note = nt;
+                ag.updatedAt = new Date().toISOString();
+            }
+            
+            // 2. تحديث في قاعدة البيانات (Firebase)
+            if (window.db && db.ref) {
+                db.ref('agents/' + targetId).update({
+                    name: n, phone: ph, address: ad, note: nt, updatedAt: new Date().toISOString()
+                }).then(() => {
+                    if(typeof window.__vipLog === 'function') window.__vipLog(`✏️ عدل بيانات الوكيل: ${n}`);
+                });
+            }
+            
+            if(typeof window.showToast === 'function') window.showToast('تم تعديل بيانات الوكيل بنجاح ✅');
+
+        } else {
+            // حالة الإضافة (وكيل جديد)
+            const id = typeof genId === 'function' ? genId() : 'ag_' + Date.now();
+            const newAgent = {id:id, name:n, phone:ph, address:ad, note:nt, createdAt:new Date().toISOString(), trans:{}};
+            
+            agents.unshift(newAgent); // تحديث محلي
+            
+            if (window.db && db.ref) {
+                db.ref('agents/' + id).set(newAgent).then(() => {
+                    if(typeof window.__vipLog === 'function') window.__vipLog(`➕ أضاف وكيل جديد: ${n}`);
+                });
+            }
+            
+            if(typeof window.showToast === 'function') window.showToast('تم إضافة الوكيل بنجاح ✅');
+        }
+
+        // إغلاق النافذة وتحديث الشاشة فوراً
+        closeModal();
+        editId = null;
+        window.editId = null;
+        updateAgentsUI(); 
+    }
+   
     function editExp(id){
   // ✅ تعديل مصروف موجود
   const e = (window.expenses||[]).find(x => x.id == id);
@@ -3687,7 +3733,193 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
         window.open(url, '_blank');
     }
 
-    // إرسال كشف حساب الوكيل على واتساب (تفاصيل الدين/التسديد + آخر حركة)
+// 1. دالة التفقيط (تحويل الأرقام إلى كلمات عربية)
+    function numberToArabicWords(n) {
+        if (n === 0) return "صفر";
+        const ones = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"];
+        const tens = ["", "عشرة", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
+        const teens = ["عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
+        const hundreds = ["", "مائة", "مائتين", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
+
+        function convertGroup(num) {
+            let str = "";
+            let h = Math.floor(num / 100);
+            let rem = num % 100;
+            if (h > 0) str += hundreds[h];
+            if (rem > 0) {
+                if (str !== "") str += " و ";
+                if (rem < 10) {
+                    str += ones[rem];
+                } else if (rem < 20) {
+                    str += teens[rem - 10];
+                } else {
+                    let t = Math.floor(rem / 10);
+                    let o = rem % 10;
+                    if (o > 0) str += ones[o] + (tens[t] ? " و " : "") + tens[t];
+                    else str += tens[t];
+                }
+            }
+            return str;
+        }
+
+        let scaleIdx = 0;
+        let parts = [];
+        let numStr = Math.floor(n).toString();
+        
+        while (numStr.length > 0) {
+            let part = numStr.slice(-3);
+            numStr = numStr.slice(0, -3);
+            let pVal = parseInt(part, 10);
+            if (pVal > 0) {
+                let pStr = convertGroup(pVal);
+                if (scaleIdx === 1) {
+                    if (pVal === 1) pStr = "ألف";
+                    else if (pVal === 2) pStr = "ألفين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " آلاف";
+                    else pStr += " ألف";
+                } else if (scaleIdx === 2) {
+                    if (pVal === 1) pStr = "مليون";
+                    else if (pVal === 2) pStr = "مليونين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " ملايين";
+                    else pStr += " مليون";
+                } else if (scaleIdx === 3) {
+                     if (pVal === 1) pStr = "مليار";
+                    else if (pVal === 2) pStr = "مليارين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " مليارات";
+                    else pStr += " مليار";
+                }
+                parts.unshift(pStr);
+            }
+            scaleIdx++;
+        }
+        return parts.join(" و ");
+    }
+
+  // 1. دالة التفقيط (تحويل الأرقام إلى كلمات عربية مضبوطة)
+    function numberToArabicWords(n) {
+        if (n === 0) return "صفر";
+        const ones = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"];
+        const tens = ["", "عشرة", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
+        const teens = ["عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
+        const hundreds = ["", "مائة", "مائتين", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
+
+        function convertGroup(num) {
+            let str = "";
+            let h = Math.floor(num / 100);
+            let rem = num % 100;
+            if (h > 0) str += hundreds[h];
+            if (rem > 0) {
+                if (str !== "") str += " و";
+                if (rem < 10) {
+                    str += ones[rem];
+                } else if (rem < 20) {
+                    str += teens[rem - 10];
+                } else {
+                    let t = Math.floor(rem / 10);
+                    let o = rem % 10;
+                    if (o > 0) str += ones[o] + (tens[t] ? " و" : "") + tens[t];
+                    else str += tens[t];
+                }
+            }
+            return str;
+        }
+
+        let scaleIdx = 0;
+        let parts = [];
+        let numStr = Math.floor(n).toString();
+        
+        while (numStr.length > 0) {
+            let part = numStr.slice(-3);
+            numStr = numStr.slice(0, -3);
+            let pVal = parseInt(part, 10);
+            if (pVal > 0) {
+                let pStr = convertGroup(pVal);
+                if (scaleIdx === 1) {
+                    if (pVal === 1) pStr = "ألف";
+                    else if (pVal === 2) pStr = "ألفين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " آلاف";
+                    else pStr += " ألف";
+                } else if (scaleIdx === 2) {
+                    if (pVal === 1) pStr = "مليون";
+                    else if (pVal === 2) pStr = "مليونين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " ملايين";
+                    else pStr += " مليون";
+                } else if (scaleIdx === 3) {
+                     if (pVal === 1) pStr = "مليار";
+                    else if (pVal === 2) pStr = "مليارين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " مليارات";
+                    else pStr += " مليار";
+                }
+                parts.unshift(pStr);
+            }
+            scaleIdx++;
+        }
+        return parts.join(" و");
+    }
+
+ // 1. دالة التفقيط (تحويل الأرقام إلى كلمات عربية مضبوطة)
+    function numberToArabicWords(n) {
+        if (n === 0) return "صفر";
+        const ones = ["", "واحد", "اثنان", "ثلاثة", "أربعة", "خمسة", "ستة", "سبعة", "ثمانية", "تسعة"];
+        const tens = ["", "عشرة", "عشرون", "ثلاثون", "أربعون", "خمسون", "ستون", "سبعون", "ثمانون", "تسعون"];
+        const teens = ["عشرة", "أحد عشر", "اثنا عشر", "ثلاثة عشر", "أربعة عشر", "خمسة عشر", "ستة عشر", "سبعة عشر", "ثمانية عشر", "تسعة عشر"];
+        const hundreds = ["", "مائة", "مائتين", "ثلاثمائة", "أربعمائة", "خمسمائة", "ستمائة", "سبعمائة", "ثمانمائة", "تسعمائة"];
+
+        function convertGroup(num) {
+            let str = "";
+            let h = Math.floor(num / 100);
+            let rem = num % 100;
+            if (h > 0) str += hundreds[h];
+            if (rem > 0) {
+                if (str !== "") str += " و";
+                if (rem < 10) {
+                    str += ones[rem];
+                } else if (rem < 20) {
+                    str += teens[rem - 10];
+                } else {
+                    let t = Math.floor(rem / 10);
+                    let o = rem % 10;
+                    if (o > 0) str += ones[o] + (tens[t] ? " و" : "") + tens[t];
+                    else str += tens[t];
+                }
+            }
+            return str;
+        }
+
+        let scaleIdx = 0;
+        let parts = [];
+        let numStr = Math.floor(n).toString();
+        
+        while (numStr.length > 0) {
+            let part = numStr.slice(-3);
+            numStr = numStr.slice(0, -3);
+            let pVal = parseInt(part, 10);
+            if (pVal > 0) {
+                let pStr = convertGroup(pVal);
+                if (scaleIdx === 1) {
+                    if (pVal === 1) pStr = "ألف";
+                    else if (pVal === 2) pStr = "ألفين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " آلاف";
+                    else pStr += " ألف";
+                } else if (scaleIdx === 2) {
+                    if (pVal === 1) pStr = "مليون";
+                    else if (pVal === 2) pStr = "مليونين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " ملايين";
+                    else pStr += " مليون";
+                } else if (scaleIdx === 3) {
+                     if (pVal === 1) pStr = "مليار";
+                    else if (pVal === 2) pStr = "مليارين";
+                    else if (pVal >= 3 && pVal <= 10) pStr += " مليارات";
+                    else pStr += " مليار";
+                }
+                parts.unshift(pStr);
+            }
+            scaleIdx++;
+        }
+        return parts.join(" و");
+    }
+
+    // 2. إرسال كشف حساب الوكيل على واتساب
     window.waLink = () => {
         const a = (typeof agents !== 'undefined' && Array.isArray(agents) ? agents : (window.agents||[])).find(x => x.id == curAgentId);
         if(!a || !a.phone) return alert('رقم الواتساب غير موجود');
@@ -3699,11 +3931,11 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
         let totalDebt = 0;
         let totalPaid = 0;
 
-        let lastVoucher = "-";
         let lastDate = "-";
         let lastTypeTxt = "-";
-        let lastTypeIcon = "";
         let lastAmount = 0;
+        let balanceBeforeStr = "-";
+        let balanceAfterStr = "-";
 
         try{
             const transArr = a.trans ? Object.values(a.trans) : [];
@@ -3714,15 +3946,32 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
                     else totalPaid += amt;
                 });
 
+                const currentNetBalance = totalDebt - totalPaid;
+
                 transArr.sort((x,y)=> new Date(y.date) - new Date(x.date));
                 const last = transArr[0];
+                
                 if(last){
-                    lastVoucher = last.voucherNo || "-";
                     lastDate = last.date ? new Date(last.date).toLocaleDateString('en-GB') : "-";
                     const isDebt = (last.type === 'debt');
-                    lastTypeIcon = isDebt ? "📉" : "💵";
-                    lastTypeTxt  = isDebt ? "دين" : "تسديد";
+                    lastTypeTxt  = isDebt ? "إضافة دين سحب" : "استلام تسديد";
                     lastAmount   = safeNum(last.amt);
+
+                    let balanceBefore = 0;
+                    if(isDebt) {
+                        balanceBefore = currentNetBalance - lastAmount; 
+                    } else {
+                        balanceBefore = currentNetBalance + lastAmount; 
+                    }
+
+                    const formatBal = (val) => {
+                        if(val > 0) return `مطلوب (${iqd(val)} د.ع)`;
+                        if(val < 0) return `يطلبنا (${iqd(Math.abs(val))} د.ع)`;
+                        return `مُصَفَّى (0 د.ع)`;
+                    };
+
+                    balanceBeforeStr = formatBal(balanceBefore);
+                    balanceAfterStr = formatBal(currentNetBalance);
                 }
             }
         }catch(e){ console.log(e); }
@@ -3730,39 +3979,51 @@ document.getElementById('stmt-date').innerText = new Date().toLocaleDateString('
         const remainingDebt = totalDebt - totalPaid;
 
         let remainingText = "";
+        let remainingTextInWords = ""; 
+
         if(remainingDebt > 0){
             remainingText = iqd(remainingDebt) + " د.ع";
+            remainingTextInWords = `(${numberToArabicWords(remainingDebt)} دينار عراقي لا غير)`;
         } else if(remainingDebt === 0){
-            remainingText = "لا يوجد دين حاليًا";
+            remainingText = "لا يوجد دين حاليًا (الذمة مُصَفَّاة)";
+            remainingTextInWords = "(صفر دينار عراقي)";
         } else {
             remainingText = "رصيد دائن لصالح الوكيل " + iqd(Math.abs(remainingDebt)) + " د.ع";
+            remainingTextInWords = `(يطلبنا مبلغ وقدره: ${numberToArabicWords(Math.abs(remainingDebt))} دينار عراقي لا غير)`;
         }
 
         const today = new Date().toLocaleDateString('en-GB');
 
-        const msg =
-`📄 كشف حساب الوكيل
-شبكة المسار لخدمات الاتصالات والإنترنت
-----------------------------------------
-👤 اسم الوكيل: ${a.name || '-'}
-📍 العنوان: ${a.address || '-'}
-📱 رقم الهاتف: ${a.phone || '-'}
-----------------------------------------
-💰 مجموع الديون: ${iqd(totalDebt)} د.ع
-💵 مجموع التسديد: ${iqd(totalPaid)} د.ع
-📊 الدين المتبقي: ${remainingText}
-----------------------------------------
-🧾 آخر حركة:
-${lastTypeIcon} النوع: ${lastTypeTxt}
-💲 المبلغ: ${iqd(lastAmount)} د.ع
-📅 تاريخ الحركة: ${lastDate}
-----------------------------------------
-📅 تاريخ الإصدار: ${today}
-قسم الحسابات`;
+const msg =
+`🏢 *شبكة المسار لخدمات الاتصالات والإنترنت*
+──────────────────────
+*كشف تفاصيل حساب الوكيل:*
+▪️ الاسم: ${a.name || '-'}
+▪️ الهاتف: ${a.phone || '-'}
+▪️ العنوان: ${a.address || '-'}
+──────────────────────
+*الملخص المالي حتى تاريخ (${today}):*
+🔻 إجمالي الديون المسحوبة: ${iqd(totalDebt)} د.ع
+✅ إجمالي المبالغ المسددة: ${iqd(totalPaid)} د.ع
+──────────────────────
+🧾 *تفاصيل آخر حركة مسجلة:*
+▪️ العملية: ${lastTypeTxt}
+▪️ المبلغ: ${iqd(lastAmount)} د.ع
+▪️ التاريخ: ${lastDate}
+⏳ *الدين قبل العملية:* ${balanceBeforeStr}
+🎯 *الدين بعد العملية:* ${balanceAfterStr}
+──────────────────────
+⚖️ *مجموع الديون (الباقي النهائي):*
+*${remainingText}*
+📝 *كتابةً:* ${remainingTextInWords}
+──────────────────────
+⚠️ *ملاحظة:*
+(يعتبر هذا الكشف موثقاً ورسمياً )
+
+*قسم الحسابات*`;
 
         openWhatsApp(a.phone, msg);
     };
-
 
 // Clock
     setInterval(() => {
@@ -15007,6 +15268,1295 @@ window.adjustAgentBalance = async function(ev){
     setInterval(() => {
         if(typeof window.updateDash === 'function') window.updateDash();
     }, 60000);
+
+})();
+</script>
+<style>
+    /* 1. إصلاح الفراغات في الشبكة العلوية */
+    #mainView .main-menu {
+        display: grid !important;
+        /* هذا السطر هو الذي سيوزع الأزرار بانتظام ويملأ الفراغ */
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important; 
+        gap: 15px !important;
+        margin-top: 20px !important;
+    }
+
+    /* 2. توسيط محتوى الأزرار */
+    #mainView .menu-btn {
+        justify-content: center !important;
+    }
+
+    /* 3. تحسين شكل التنبيه في اللوحة السوداء ليكون أوضح (تلوين الخلفية بشفافية) */
+    .masar-smart-alert.alert-warning {
+        background: rgba(239, 68, 68, 0.15) !important; 
+        border: 1px solid rgba(239, 68, 68, 0.4) !important;
+        color: #fca5a5 !important;
+        padding: 8px 15px !important;
+        border-radius: 8px !important;
+    }
+
+    /* 4. فصل الأزرار العريضة (اللوحة التنفيذية وغيرها) لتبدو كقسم مستقل */
+    #mainView .wide-btn {
+        grid-column: 1 / -1 !important;
+        margin-top: 5px !important;
+        border-right: 5px solid #3b82f6 !important;
+    }
+    
+    /* إضافة فاصل فوق أول زر عريض لعزله عن العمليات اليومية */
+    #mainView .wide-btn:first-of-type {
+        margin-top: 20px !important;
+        border-top: 1px dashed #e2e8f0 !important;
+    }
+</style>
+<script>
+(function(){
+    // 1. فتح نافذة التعديل وحفظ المعرف بأمان
+    window.editAgent = function(id, e) {
+        if(e) e.stopPropagation();
+        
+        window.masarSafeAgentId = id;
+        try { window.editId = id; } catch(err){}
+        try { editId = id; } catch(err){}
+
+        const agent = (window.agents || []).find(x => String(x.id) === String(id));
+        if(!agent) { alert("حدث خطأ: الوكيل غير موجود"); return; }
+
+        if(typeof window.openModal === 'function') window.openModal('agent');
+
+        setTimeout(() => {
+            const titleEl = document.querySelector('#modalBody h3');
+            if(titleEl) titleEl.innerText = '✏️ تعديل بيانات الوكيل';
+
+            const n = document.getElementById('inAgName');
+            const ph = document.getElementById('inAgPhone');
+            const ad = document.getElementById('inAgAddr');
+            const nt = document.getElementById('inAgNote');
+
+            if(n) n.value = agent.name || '';
+            if(ph) ph.value = agent.phone || agent.phoneNumber || '';
+            if(ad) ad.value = agent.address || agent.location || '';
+            if(nt) nt.value = agent.note || agent.notes || '';
+        }, 150);
+    };
+
+    // 2. الحفظ وإرسال التعديلات المفصلة للسجل
+    window.saveAgent = function() {
+        const n = (document.getElementById('inAgName')?.value || '').trim();
+        const ph = (document.getElementById('inAgPhone')?.value || '').trim();
+        const ad = (document.getElementById('inAgAddr')?.value || '').trim();
+        const nt = (document.getElementById('inAgNote')?.value || '').trim();
+
+        if(!n) return alert("⚠️ يرجى كتابة اسم الوكيل");
+
+        let targetId = window.masarSafeAgentId || window.editId;
+        try { if(!targetId && typeof editId !== 'undefined') targetId = editId; } catch(err){}
+
+        const nowIso = new Date().toISOString();
+        const activeDb = (typeof db !== 'undefined' && db !== null) ? db : (window.db || null);
+
+        // === حالة التعديل ===
+        if (targetId) {
+            let beforeData = {};
+            let afterData = { name: n, phone: ph, address: ad, note: nt };
+
+            // أ. سحب البيانات القديمة (لأجل السجل) ثم تحديث الذاكرة المحلية
+            if(window.agents && Array.isArray(window.agents)) {
+                let ag = window.agents.find(x => String(x.id) === String(targetId));
+                if(ag) {
+                    beforeData = { name: ag.name || '', phone: ag.phone || '', address: ag.address || '', note: ag.note || '' };
+                    ag.name = n; ag.phone = ph; ag.address = ad; ag.note = nt; ag.updatedAt = nowIso;
+                }
+            }
+
+            // ب. تحديث السيرفر
+            if(activeDb && activeDb.ref) {
+                activeDb.ref('agents/' + targetId).update({
+                    name: n, phone: ph, address: ad, note: nt, updatedAt: nowIso
+                }).catch(err => console.log(err));
+            }
+
+            // ج. 🎯 إرسال البيانات القديمة والجديدة للسجل لكي يتم عرضها
+            if(typeof window.__vipLog === 'function') {
+                window.__vipLog(`✏️ تم تعديل بيانات الوكيل: ${n}`, {
+                    action: 'update_agent', 
+                    agentId: targetId,
+                    agentName: n,
+                    before: beforeData,
+                    after: afterData
+                });
+            }
+            if(typeof window.showToast === 'function') window.showToast('تم حفظ التعديلات بنجاح ✅');
+            
+        } 
+        // === حالة الإضافة ===
+        else {
+            const newId = 'ag_' + Date.now();
+            const newAg = { id: newId, name: n, phone: ph, address: ad, note: nt, createdAt: nowIso, trans: {} };
+            
+            if(window.agents) window.agents.unshift(newAg);
+            if(activeDb && activeDb.ref) activeDb.ref('agents/' + newId).set(newAg);
+
+            if(typeof window.__vipLog === 'function') window.__vipLog(`➕ إضافة وكيل جديد: ${n}`, {action: 'add_new_agent'});
+            if(typeof window.showToast === 'function') window.showToast('تم إضافة الوكيل بنجاح ✅');
+        }
+
+        // تنظيف وإغلاق
+        window.masarSafeAgentId = null;
+        window.editId = null;
+        try { editId = null; } catch(err){}
+
+        const modal = document.getElementById('modal');
+        if(modal) modal.style.display = 'none';
+
+        if(typeof window.renderAgentsList === 'function') window.renderAgentsList();
+        if(typeof window.updateDash === 'function') window.updateDash();
+    };
+})();
+</script>
+<script>
+(function(){
+    // دالتك التي تعطي التاريخ الصحيح
+    function getToday() {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    async function startAutoFirebaseBackup() {
+        if (typeof db === 'undefined') return;
+
+        const dateStr = getToday();
+        
+        // سحب البيانات من كل الجداول
+        const paths = ['agents','expenses','logs','settings','users'];
+        const results = await Promise.all(paths.map(p => db.ref(p).once('value').then(s => [p, s.val() || {}])));
+        const fullData = Object.fromEntries(results);
+
+        const pack = {
+            backup_date: dateStr,
+            timestamp: new Date().getTime(),
+            data: fullData
+        };
+
+        // --- (الرفع التلقائي للسيرفر) ---
+        // سيتم إنشاء مجلد بالفايربيس باسم (Auto_Backups) وبداخله تاريخ اليوم
+        db.ref('Auto_Backups/' + dateStr).set(pack)
+        .then(() => {
+            console.log("✅ تم الرفع التلقائي للسيرفر بتاريخ: " + dateStr);
+        });
+
+        // --- (التنزيل للحاسبة - مرة واحدة يومياً) ---
+        if (localStorage.getItem('saved_' + dateStr) !== 'true') {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(pack)], {type:'application/json'}));
+            a.download = `MASAR_${dateStr}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            localStorage.setItem('saved_' + dateStr, 'true');
+        }
+    }
+
+    // يشتغل تلقائياً بعد 10 ثواني من فتح الصفحة
+    setTimeout(startAutoFirebaseBackup, 10000);
+})();
+</script>
+<script>
+(function() {
+    let viewYear = new Date().getFullYear();
+    let viewMonth = new Date().getMonth();
+
+    function injectStyledButton() {
+        let oldBtn = document.getElementById('mini-size-btn');
+        if (oldBtn) oldBtn.remove();
+        if (document.getElementById('perfect-match-btn')) return;
+
+        let elements = document.querySelectorAll('div, button, a');
+        let targetPanel = null;
+        
+        for (let el of elements) {
+            if (el.innerText && el.innerText.trim().includes('لوحة الإدارة التنفيذية') && el.offsetHeight > 20 && el.offsetHeight < 100) {
+                targetPanel = el;
+                break;
+            }
+        }
+
+        if (targetPanel && targetPanel.parentNode) {
+            let newBtn = document.createElement('div');
+            newBtn.id = 'perfect-match-btn';
+            newBtn.innerHTML = '📊 جرد يومي ';
+            
+            newBtn.style.cssText = `
+                background: #ffffff;
+                color: #000000 !important;
+                padding: 15px 10px;
+                border-radius: 12px;
+                text-align: center;
+                font-size: 15px !important;
+                font-weight: 900 !important;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                border: 1px solid #f0f0f0;
+                font-family: tahoma, sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 12px 0; 
+                width: 100%;
+                min-height: 75px;
+                transition: 0.2s;
+            `;
+            
+            newBtn.onmouseover = () => { newBtn.style.transform = 'scale(0.99)'; };
+            newBtn.onmouseout = () => { newBtn.style.transform = 'scale(1)'; };
+            
+            newBtn.onclick = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                viewYear = new Date().getFullYear();
+                viewMonth = new Date().getMonth();
+                openStyledModal();
+            };
+
+            targetPanel.parentNode.insertBefore(newBtn, targetPanel);
+        }
+    }
+
+    window.changeMonthStyled = function(offset) {
+        viewMonth += offset;
+        if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+        if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+        renderStyledTable();
+    };
+
+    function openStyledModal() {
+        const modalHtml = `
+        <div id="styledMonthModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:999999;display:flex;align-items:center;justify-content:center;direction:rtl;font-family:tahoma;">
+            <div style="background:#f8f9fa; width:92%; max-width:550px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.4); display:flex; flex-direction:column; max-height:85vh; overflow:hidden;">
+                
+                <div style="background:#fff; padding:10px 15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #dee2e6;">
+                    <button onclick="changeMonthStyled(-1)" style="background:#495057; color:#fff; border:none; padding:5px 10px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;">◀ السابق</button>
+                    <h3 id="sModalMonthTitle" style="margin:0; color:#212529; font-size:14px; font-weight:bold;">شهر --</h3>
+                    <button onclick="changeMonthStyled(1)" style="background:#495057; color:#fff; border:none; padding:5px 10px; border-radius:6px; cursor:pointer; font-weight:bold; font-size:11px;">التالي ▶</button>
+                </div>
+
+                <div style="flex:1; overflow-y:auto; padding:8px; background:#fff;">
+                    <table style="width:100%; border-collapse:collapse; text-align:center;">
+                        <thead style="background:#1a1a1a; color:#ffffff; position:sticky; top:0;">
+                            <tr>
+                                <th style="padding:8px 2px; font-size:11px; border-bottom:2px solid #333;">اليوم</th>
+                                <th style="padding:8px 2px; font-size:11px; border-bottom:2px solid #333;">التاريخ</th>
+                                <th style="padding:8px 2px; font-size:11px; border-bottom:2px solid #333;">ديون 📉</th>
+                                <th style="padding:8px 2px; font-size:11px; border-bottom:2px solid #333;">تسديد 💵</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sModalTableBody">
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="background:#fff; border-top:1px solid #dee2e6; padding:0 10px 10px 10px;">
+                    <table style="width:100%; border-collapse:collapse; text-align:center; font-weight:bold; margin-top:5px;">
+                        <tr style="background:#f8f9fa;">
+                            <td colspan="2" style="padding:8px; text-align:right; font-size:12px; color:#495057;">إجمالي الديون / التسديد:</td>
+                            <td id="sTotalDebt" style="padding:8px; color:#dc3545; font-size:12px; border:1px solid #dee2e6; width:25%;">0</td>
+                            <td id="sTotalPay" style="padding:8px; color:#198754; font-size:12px; border:1px solid #dee2e6; width:25%;">0</td>
+                        </tr>
+                        <tr style="background:#e0f2fe;">
+                            <td colspan="2" style="padding:8px; text-align:right; font-size:12px; color:#1e40af;">الباقي (التسديد - الديون):</td>
+                            <td colspan="2" id="sFirstNet" style="padding:8px; font-size:13px; border:1px solid #dee2e6; color:#1e40af;">0</td>
+                        </tr>
+                        <tr style="background:#fff7ed;">
+                            <td colspan="2" style="padding:8px; text-align:right; font-size:12px; color:#c2410c;">يطرح منه المصاريف (-):</td>
+                            <td colspan="2" id="sTotalExp" style="padding:8px; font-size:12px; border:1px solid #dee2e6; color:#c2410c;">0</td>
+                        </tr>
+                        <tr style="background:#e9ecef;">
+                            <td colspan="2" style="padding:10px; text-align:right; font-size:13px; color:#212529;"> راس المال:</td>
+                            <td colspan="2" id="sNetTotal" style="padding:10px; font-size:14px; border:1px solid #dee2e6;">0</td>
+                        </tr>
+                    </table>
+                    <button id="closeStyledBtn" style="margin-top:10px; width:100%; padding:8px; background:#212529; color:#fff; border:none; border-radius:8px; font-size:13px; font-weight:bold; cursor:pointer;">إغلاق</button>
+                </div>
+
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        document.getElementById('closeStyledBtn').onclick = function(e) {
+            e.preventDefault(); e.stopPropagation();
+            document.getElementById('styledMonthModal').remove();
+        };
+
+        renderStyledTable();
+    }
+
+    function renderStyledTable() {
+        const monthNames = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+        document.getElementById('sModalMonthTitle').innerText = `جرد شهر ${monthNames[viewMonth]} / ${viewYear}`;
+
+        let tD = 0, tP = 0, tE = 0;
+        const daysMap = {};
+        
+        let mStr = String(viewMonth + 1).padStart(2, '0');
+        let monthPrefix = `${viewYear}-${mStr}`;
+
+        // حساب الديون والتسديدات (الوكلاء)
+        (window.agents || []).forEach(a => {
+            if(a.trans) Object.values(a.trans).forEach(t => {
+                if(t.date && t.date.startsWith(monthPrefix)) {
+                    let dStr = t.date.slice(0, 10);
+                    if(!daysMap[dStr]) daysMap[dStr] = { d: 0, p: 0 };
+                    let amt = parseFloat(t.amt || 0);
+                    if(t.type === 'debt') { daysMap[dStr].d += amt; tD += amt; }
+                    else if(t.type === 'pay') { daysMap[dStr].p += amt; tP += amt; }
+                }
+            });
+        });
+
+        // حساب المصاريف لنفس الشهر
+        (window.expenses || []).forEach(e => {
+            let eDate = e.date || e.createdAt || '';
+            if(eDate.startsWith(monthPrefix)) {
+                tE += parseFloat(e.amount || e.amt || 0);
+            }
+        });
+
+        let keys = Object.keys(daysMap).sort().reverse();
+        let rowsHtml = '';
+        
+        let todayStr = new Date().toISOString().slice(0, 10);
+        let yesterdayObj = new Date(); yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+        let yesterdayStr = yesterdayObj.toISOString().slice(0, 10);
+
+        if (keys.length === 0) {
+            rowsHtml = `<tr><td colspan="4" style="padding:20px; font-size:12px; color:#6c757d;">لا توجد حركة مسجلة لهذا الشهر</td></tr>`;
+        } else {
+            keys.forEach(dateStr => {
+                let dObj = new Date(dateStr);
+                let dayName = dObj.toLocaleDateString('ar-IQ', { weekday: 'long' });
+                if (dateStr === todayStr) dayName = 'اليوم';
+                if (dateStr === yesterdayStr) dayName = 'أمس';
+
+                let d = daysMap[dateStr].d;
+                let p = daysMap[dateStr].p;
+
+                rowsHtml += `
+                <tr style="border-bottom:1px solid #dee2e6; background:#fff;">
+                    <td style="padding:6px 2px; font-weight:bold; color:#495057; font-size:11px;">${dayName}</td>
+                    <td style="padding:6px 2px; color:#6c757d; font-size:10px;">${dateStr}</td>
+                    <td style="padding:6px 2px; color:#dc3545; font-weight:bold; font-size:12px;">${d > 0 ? d.toLocaleString() : '-'}</td>
+                    <td style="padding:6px 2px; color:#198754; font-weight:bold; font-size:12px;">${p > 0 ? p.toLocaleString() : '-'}</td>
+                </tr>`;
+            });
+        }
+
+        // طباعة القيم بالجدول السفلي بالترتيب الدقيق المطلوب
+        document.getElementById('sModalTableBody').innerHTML = rowsHtml;
+        
+        document.getElementById('sTotalDebt').innerText = tD.toLocaleString();
+        document.getElementById('sTotalPay').innerText = tP.toLocaleString();
+        document.getElementById('sTotalExp').innerText = tE.toLocaleString();
+
+        // 1. حساب "المجموع" (التسديد - الديون)
+        let firstNet = tP - tD;         
+        let firstNetCell = document.getElementById('sFirstNet');
+        firstNetCell.innerText = Math.abs(firstNet).toLocaleString() + (firstNet >= 0 ? ' (فائض)' : ' (مطلوب)');
+        firstNetCell.style.color = firstNet >= 0 ? '#1d4ed8' : '#dc2626';
+
+        // 2. حساب "الصافي النهائي" (المجموع - المصاريف)
+        let finalNet = firstNet - tE;   
+        let netCell = document.getElementById('sNetTotal');
+        netCell.innerText = Math.abs(finalNet).toLocaleString() + ' د.ع ' + (finalNet >= 0 ? '📈' : '📉');
+        netCell.style.color = finalNet >= 0 ? '#16a34a' : '#dc3545';
+    }
+
+    setInterval(injectStyledButton, 1000);
+})();
+</script>
+<style>
+    /* =========================================
+       1. إصلاح أزرار الداش بورد
+       ========================================= */
+    #perfect-match-btn, #btnCompanyInventory { grid-column: span 1 !important; margin: 0 !important; display: flex !important; width: 100% !important; }
+    
+    /* =========================================
+       2. ستايلات نظام جرد المخزن (نظام القوائم/الوصولات)
+       ========================================= */
+    .inv-folder-card { background: #ffffff; border-radius: 12px; padding: 15px; margin-bottom: 12px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 3px 6px rgba(0,0,0,0.04); cursor: pointer; transition: 0.2s; }
+    .inv-folder-card:hover { transform: translateX(-5px); box-shadow: 0 5px 12px rgba(0,0,0,0.08); }
+    .inv-folder-warehouse { border-right: 5px solid #3b82f6; }
+    .inv-folder-emp { border-right: 5px solid #10b981; }
+    .inv-folder-custom { border-right: 5px solid #8b5cf6; }
+    body.dark-mode .inv-folder-card { background: #1e293b; border-color: #334155; }
+
+    .inv-f-title { font-size: 1.15rem; font-weight: 900; color: #0f172a; display: flex; align-items: center; gap: 8px; }
+    body.dark-mode .inv-f-title { color: #f8fafc; }
+    .inv-f-count { background: #f1f5f9; color: #475569; padding: 4px 10px; border-radius: 8px; font-size: 0.85rem; font-weight: bold; border: 1px solid #cbd5e1;}
+    body.dark-mode .inv-f-count { background: #0f172a; color: #94a3b8; border-color: #475569;}
+
+    /* =========================================
+       3. تصميم القائمة (الوصل) الداخلي
+       ========================================= */
+    .voucher-card { background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; margin-bottom: 15px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    body.dark-mode .voucher-card { background: #0f172a; border-color: #475569; }
+    
+    .voucher-header { background: #f8fafc; padding: 12px 15px; border-bottom: 2px dashed #cbd5e1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    body.dark-mode .voucher-header { background: #1e293b; border-bottom-color: #334155; }
+    
+    .v-h-title { font-weight: 900; font-size: 1.05rem; color: #0f172a; display: flex; align-items: center; gap: 5px; }
+    .v-h-date { font-size: 0.85rem; color: #64748b; font-weight: bold; direction: ltr; }
+    body.dark-mode .v-h-title { color: #f8fafc; } body.dark-mode .v-h-date { color: #cbd5e1; }
+
+    .voucher-table { width: 100%; border-collapse: collapse; text-align: center; font-size: 0.9rem; }
+    .voucher-table th { background: #1e293b; color: #fff; padding: 8px; font-weight: bold; border-bottom: 2px solid #334155;}
+    .voucher-table td { padding: 8px; border-bottom: 1px solid #e2e8f0; color: #1e293b; font-weight: bold; }
+    body.dark-mode .voucher-table td { border-bottom-color: #334155; color: #e2e8f0; }
+
+    .voucher-footer { padding: 12px 15px; display: flex; flex-direction: column; gap: 10px; }
+    .v-note { background: #fffbeb; color: #b45309; padding: 8px 10px; border-radius: 6px; border: 1px dashed #fcd34d; font-size: 0.85rem; font-weight: bold; }
+    body.dark-mode .v-note { background: rgba(245, 158, 11, 0.1); color: #fbbf24; border-color: #92400e; }
+
+    .v-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .inv-btn-sm { padding: 6px 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 0.8rem; font-family: 'Tajawal'; transition: 0.2s; display: flex; align-items: center; gap: 5px; text-decoration: none;}
+
+    /* =========================================
+       4. ستايلات الإضافة (الخانات الديناميكية الجديدة)
+       ========================================= */
+    .emp-input-group { background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; margin-bottom: 10px; }
+    body.dark-mode .emp-input-group { background: #0f172a; border-color: #334155; }
+
+    .dynamic-item-row { 
+        display: flex; gap: 5px; align-items: center; margin-bottom: 8px; 
+        background: #fff; padding: 6px; border-radius: 6px; border: 1px solid #cbd5e1; 
+    }
+    body.dark-mode .dynamic-item-row { background: #1e293b; border-color: #475569; }
+    
+    .dynamic-item-row input { margin: 0 !important; height: 38px; font-size: 0.85rem; padding: 0 5px;}
+    
+    .row-seq-num { 
+        background: #334155; color: white; width: 24px; height: 24px; 
+        display: flex; justify-content: center; align-items: center; 
+        border-radius: 50%; font-weight: bold; font-size: 0.8rem; flex-shrink: 0;
+    }
+    
+    .btn-remove-row { 
+        background: #fee2e2; color: #dc2626; border: none; border-radius: 6px; 
+        width: 32px; height: 38px; font-weight: bold; cursor: pointer; 
+        display: flex; justify-content: center; align-items: center; flex-shrink: 0;
+    }
+
+    @media print {
+        body * { visibility: hidden; }
+        #inventoryPrintArea, #inventoryPrintArea * { visibility: visible; }
+        #inventoryPrintArea { position: absolute; left: 0; top: 0; width: 100%; direction: rtl; padding: 20px; font-family: Arial, sans-serif; background: #fff;}
+        .inv-print-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; direction: rtl; text-align: center; }
+        .inv-print-table th { background: #f1f5f9; padding: 10px; border: 1px solid #cbd5e1; color: #000; font-weight: bold; }
+        .inv-print-table td { padding: 8px; border: 1px solid #cbd5e1; color: #000; }
+        .print-voucher-box { border: 2px solid #000; border-radius: 8px; padding: 15px; margin-bottom: 20px; page-break-inside: avoid; }
+    }
+</style>
+
+<script>
+/* =========================================================
+   نظام جرد مواد الشركة - إصدار (حل مشكلة الخروج من النافذة)
+   ========================================================= */
+(function(){
+    window.inventoryData = [];
+    window.__INV_EDIT_ID = null;
+    window.__CURRENT_INV_VIEW = 'groups'; 
+    window.__CURRENT_GROUP_KEY = null; 
+
+    function fixPhoneForWA(phone) {
+        if (!phone) return "";
+        let p = String(phone).replace(/\D/g, ''); 
+        if (p.startsWith('00964')) return p.substring(2);
+        if (p.startsWith('07') && p.length === 11) return '964' + p.substring(1);
+        if (p.startsWith('7') && p.length === 10) return '964' + p;
+        return p;
+    }
+
+    function injectInventoryView() {
+        if(document.getElementById('inventoryViewWrapper')) return;
+        const appContent = document.getElementById('appContent');
+        if(!appContent) return;
+
+        const wrapper = document.createElement('div');
+        wrapper.id = 'inventoryViewWrapper';
+        wrapper.className = 'container';
+        wrapper.style.display = 'none';
+
+        wrapper.innerHTML = `
+            <div id="invGroupsPage">
+                <div class="section-header">
+                    <button class="back-btn-big" onclick="nav('main')">⬅ رجوع</button>
+                    <span>📦 جرد المواد والذمم</span>
+                </div>
+                
+                <div class="advanced-filter" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
+                    <button type="button" class="btn-main btn-primary" style="padding:10px; font-size:0.95rem; flex:1; min-width:140px;" onclick="openInventoryModal(null, 'warehouse')">➕ إضافة للمخزن</button>
+                    <button type="button" class="btn-main" style="background:#10b981; padding:10px; font-size:0.95rem; flex:1; min-width:140px;" onclick="openInventoryModal(null, 'active')">👤 سحب ذمة (موظف/وكيل)</button>
+                    <button type="button" class="btn-main" style="background:#f59e0b; padding:10px; font-size:0.95rem; flex:1; min-width:100px;" onclick="exportInventoryExcel()">📊 Excel كلي</button>
+                </div>
+
+                <input type="text" id="invSearchGroups" class="app-input" placeholder="🔍 ابحث عن موظف، وكيل، أو ملف..." oninput="renderInventoryGroups()">
+                <div id="invGroupsListUI" style="margin-top: 15px;"></div>
+            </div>
+
+            <div id="invDetailsPage" style="display:none;">
+                <button class="inv-back-btn" onclick="showInvGroupsPage()">⬅ العودة للقائمة</button>
+                <div id="invDetailsHeaderBox" style="background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:15px; margin-bottom:15px; box-shadow:0 2px 4px rgba(0,0,0,0.02);"></div>
+                <div id="invDetailsListUI"></div>
+            </div>
+
+            <div id="inventoryPrintArea" style="display:none;"></div>
+        `;
+        appContent.appendChild(wrapper);
+    }
+
+    const _origNav = window.nav;
+    if(typeof _origNav === 'function' && !window.__invNavPatched) {
+        window.__invNavPatched = true;
+        window.nav = function(viewName) {
+            const invView = document.getElementById('inventoryViewWrapper');
+            if(invView) invView.style.display = 'none';
+
+            if(viewName === 'inventory') {
+                ['mainView','agentsView','expensesView','reportsView','detailsView','usersView','logsView','adminExecutiveView'].forEach(id => {
+                    let el = document.getElementById(id); if(el) el.style.display = 'none';
+                });
+                if(invView) invView.style.display = 'block';
+                showInvGroupsPage();
+                return;
+            }
+            _origNav.apply(this, arguments);
+        };
+    }
+
+    function safeEnforceDashboard() {
+        const menu = document.querySelector('#mainView .main-menu');
+        if(!menu) return;
+        let dailyBtn = document.getElementById('perfect-match-btn');
+        let invBtn = document.getElementById('btnCompanyInventory');
+        if (!invBtn) {
+            invBtn = document.createElement('button');
+            invBtn.id = 'btnCompanyInventory';
+            invBtn.className = 'menu-btn';
+            invBtn.innerHTML = '📦 جرد المواد';
+            invBtn.onclick = (e) => { e.preventDefault(); window.nav('inventory'); };
+        }
+        if(dailyBtn) { dailyBtn.classList.remove('wide-btn'); dailyBtn.className = 'menu-btn'; }
+        if(invBtn) { invBtn.classList.remove('wide-btn'); invBtn.className = 'menu-btn'; }
+        if (dailyBtn && invBtn && dailyBtn.parentNode === menu && invBtn.parentNode === menu) {
+            if (dailyBtn.nextSibling !== invBtn) menu.insertBefore(invBtn, dailyBtn.nextSibling);
+        } else if (invBtn && invBtn.parentNode !== menu) {
+            menu.appendChild(invBtn);
+        }
+    }
+
+    function loadInventoryData() {
+        if(typeof db === 'undefined' || !db) return;
+        db.ref('inventory').on('value', snap => {
+            const val = snap.val() || {};
+            window.inventoryData = Object.entries(val).map(([id, data]) => ({ id, ...data }));
+            
+            const invView = document.getElementById('inventoryViewWrapper');
+            if(invView && invView.style.display !== 'none') {
+                if(window.__CURRENT_INV_VIEW === 'groups') renderInventoryGroups();
+                else renderInventoryDetails(window.__CURRENT_GROUP_KEY);
+            }
+        });
+    }
+
+    function getInventoryGroups() {
+        let groups = {
+            'المخزن الرئيسي': { type: 'warehouse', name: 'المخزن الرئيسي', icon: '🏢', lists: [] },
+            'أخرى (تالف/استهلاك)': { type: 'custom', name: 'أخرى (تالف/استهلاك)', icon: '♻️', lists: [] }
+        };
+
+        window.inventoryData.forEach(list => {
+            let status = list.status || 'warehouse';
+            if (status === 'warehouse') {
+                groups['المخزن الرئيسي'].lists.push(list);
+            } else if (status === 'active' || status === 'done') {
+                let empName = (list.empName || (list.emp || '').split('-')[0]).trim() || 'مستلم غير معروف';
+                if (!groups[empName]) {
+                    groups[empName] = { type: 'emp', name: empName, icon: '👤', phone: list.phone || '', address: list.address || '', lists: [] };
+                }
+                groups[empName].lists.push(list);
+                
+                if(!groups[empName].phone && list.phone) groups[empName].phone = list.phone;
+                if(!groups[empName].phone) {
+                    let extracted = fixPhoneForWA(list.emp);
+                    if(extracted) groups[empName].phone = extracted;
+                }
+                if(!groups[empName].address && list.address) groups[empName].address = list.address;
+            } else {
+                groups['أخرى (تالف/استهلاك)'].lists.push(list);
+            }
+        });
+        return groups;
+    }
+
+    window.showInvGroupsPage = function() {
+        window.__CURRENT_INV_VIEW = 'groups';
+        window.__CURRENT_GROUP_KEY = null;
+        document.getElementById('invGroupsPage').style.display = 'block';
+        document.getElementById('invDetailsPage').style.display = 'none';
+        renderInventoryGroups();
+    };
+
+    window.renderInventoryGroups = function() {
+        const listUI = document.getElementById('invGroupsListUI');
+        if(!listUI) return;
+
+        const groups = getInventoryGroups();
+        const search = (document.getElementById('invSearchGroups')?.value || '').toLowerCase();
+
+        let html = '';
+
+        Object.values(groups).forEach(g => {
+            if (g.type === 'custom' && g.lists.length === 0) return; 
+            if (search && !g.name.toLowerCase().includes(search)) return;
+
+            let borderClass = g.type === 'warehouse' ? 'inv-folder-warehouse' : (g.type === 'emp' ? 'inv-folder-emp' : 'inv-folder-custom');
+            
+            let totalItemsCount = 0;
+            g.lists.forEach(l => {
+                if(l.items) totalItemsCount += l.items.length;
+                else totalItemsCount += 1; 
+            });
+
+            html += `
+            <div class="inv-folder-card ${borderClass}" onclick="openInventoryDetails('${g.name}')">
+                <div class="inv-f-title">${g.icon} ${g.name}</div>
+                <div class="inv-f-count">${g.lists.length} قوائم (${totalItemsCount} مادة)</div>
+            </div>
+            `;
+        });
+
+        if(!html) html = '<div style="text-align:center; padding:20px; color:gray; font-weight:bold;">لا توجد ملفات مطابقة</div>';
+        listUI.innerHTML = html;
+    };
+
+    window.openInventoryDetails = function(groupKey) {
+        window.__CURRENT_INV_VIEW = 'details';
+        window.__CURRENT_GROUP_KEY = groupKey;
+        document.getElementById('invGroupsPage').style.display = 'none';
+        document.getElementById('invDetailsPage').style.display = 'block';
+        renderInventoryDetails(groupKey);
+    };
+
+    window.renderInventoryDetails = function(groupKey) {
+        const listUI = document.getElementById('invDetailsListUI');
+        const headerUI = document.getElementById('invDetailsHeaderBox');
+        if(!listUI || !headerUI) return;
+
+        const groups = getInventoryGroups();
+        const g = groups[groupKey];
+        if(!g) { showInvGroupsPage(); return; }
+
+        let actionButtons = `
+            <button type="button" style="background:#0284c7; color:#fff; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer;" onclick="openInventoryModal(null, '${g.type === 'warehouse' ? 'warehouse' : 'active'}', '${g.name}')">➕ إضافة قائمة جديدة</button>
+            <button type="button" style="background:#0f172a; color:#fff; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer;" onclick="printGroupAllVouchers('${g.name}')">📄 كشف كامل PDF</button>
+        `;
+        
+        if (g.type === 'emp') {
+            actionButtons += `<button type="button" style="background:#25D366; color:#fff; border:none; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer; margin-right:8px;" onclick="sendGroupWhatsApp('${g.name}', event)">💬 إرسال كشف ذمة (واتساب)</button>`;
+        }
+
+        const isDark = document.body.classList.contains('dark-mode');
+        headerUI.style.background = isDark ? '#1e293b' : '#fff';
+        headerUI.style.borderColor = isDark ? '#334155' : '#e2e8f0';
+
+        headerUI.innerHTML = `
+            <div style="font-size:1.2rem; font-weight:900; color:${isDark?'#f8fafc':'#0f172a'}; margin-bottom:8px;">
+                ${g.icon} ${g.type === 'emp' ? 'ذمة المستلم: ' : ''} ${g.name}
+            </div>
+            ${g.phone ? `<div style="font-size:0.85rem; color:${isDark?'#93c5fd':'#2563eb'}; font-weight:bold; margin-bottom:4px; direction:ltr; text-align:right;">📞 ${g.phone}</div>` : ''}
+            ${g.address ? `<div style="font-size:0.85rem; color:${isDark?'#cbd5e1':'#475569'}; font-weight:bold; margin-bottom:10px; text-align:right;">📍 ${g.address}</div>` : ''}
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">${actionButtons}</div>
+        `;
+
+        let itemsHtml = '';
+        let sortedLists = g.lists.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+
+        if(sortedLists.length === 0) {
+            itemsHtml = '<div style="text-align:center; padding:20px; color:gray; font-weight:bold;">هذا الملف فارغ حالياً</div>';
+        } else {
+            sortedLists.forEach(list => {
+                let isDone = list.status === 'done';
+                let statusBadge = list.status === 'warehouse' ? '🏢 في المخزن' : (isDone ? '🟢 تم التصفية/تالف' : '🔴 بذمته');
+                let badgeClass = list.status === 'warehouse' ? '#3b82f6' : (isDone ? '#10b981' : '#ef4444');
+
+                let itemsArray = list.items ? list.items : [{ name: list.name, qty: list.qty, type: list.type }];
+
+                let tableHtml = `
+                    <table class="voucher-table">
+                        <thead>
+                            <tr><th style="width:10%">ت</th><th style="width:50%">المادة</th><th style="width:20%">النوع</th><th style="width:20%">العدد</th></tr>
+                        </thead>
+                        <tbody>
+                `;
+                itemsArray.forEach((itm, idx) => {
+                    tableHtml += `<tr><td>${idx+1}</td><td>${itm.name}</td><td>${itm.type||'-'}</td><td style="font-weight:900; color:#1d4ed8;">${itm.qty}</td></tr>`;
+                });
+                tableHtml += `</tbody></table>`;
+
+                itemsHtml += `
+                <div class="voucher-card" style="opacity: ${isDone ? '0.7' : '1'}; border-right: 4px solid ${badgeClass};">
+                    <div class="voucher-header">
+                        <div class="v-h-title">📑 قائمة سحب / إيداع</div>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <div style="background:${badgeClass}; color:#fff; padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:bold;">${statusBadge}</div>
+                            <div class="v-h-date">📅 ${new Date(list.date).toLocaleDateString('en-GB')}</div>
+                        </div>
+                    </div>
+                    
+                    ${tableHtml}
+                    
+                    <div class="voucher-footer">
+                        ${list.note ? `<div class="v-note">📝 ملاحظات: ${list.note}</div>` : ''}
+                        <div class="v-actions">
+                            <button type="button" class="inv-btn-sm" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;" onclick="openInventoryModal('${list.id}')">✏️ تعديل القائمة</button>
+                            <button type="button" class="inv-btn-sm" style="background:#fee2e2; color:#b91c1c; border:1px solid #fecaca;" onclick="deleteInventoryItem('${list.id}')">🗑️ حذف</button>
+                            <button type="button" class="inv-btn-sm" style="background:#f1f5f9; color:#0f172a; border:1px solid #cbd5e1;" onclick="printSingleVoucher('${list.id}')">🖨️ طباعة الوصل</button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+        }
+        listUI.innerHTML = itemsHtml;
+    };
+
+    // 🔥 دالة تحديث الحالة الآمنة (لا تسبب خروج من النظام) 🔥
+    window.toggleEmpFieldInv = function(e) {
+        // حماية من تداخل الأحداث (Event Bubbling)
+        if(e) {
+            e.preventDefault();
+            if(typeof e.stopPropagation === 'function') e.stopPropagation();
+        }
+        
+        const statElem = document.getElementById('invInpStatus');
+        const empBox = document.getElementById('empFieldContainer');
+        
+        if(statElem && empBox) {
+            if(statElem.value === 'active' || statElem.value === 'done') {
+                empBox.style.display = 'block';
+            } else {
+                empBox.style.display = 'none';
+            }
+        }
+    };
+
+    window.updateRowNumbers = function() {
+        document.querySelectorAll('#invDynamicItemsContainer .dynamic-item-row').forEach((row, index) => {
+            let seqSpan = row.querySelector('.row-seq-num');
+            if(seqSpan) seqSpan.innerText = index + 1;
+        });
+    };
+
+    window.removeInvItemRow = function(btn) {
+        btn.parentElement.remove();
+        updateRowNumbers();
+    };
+
+    function generateItemRowHtml(name='', qty='', type='', idx=0) {
+        return `
+        <div class="dynamic-item-row">
+            <div class="row-seq-num">${idx + 1}</div>
+            <input type="text" class="app-input i-name" style="flex:2;" placeholder="اسم المادة" value="${name}">
+            <input type="text" class="app-input i-type" style="flex:1;" placeholder="النوع" value="${type}">
+            <input type="number" class="app-input i-qty" style="width:65px;" placeholder="العدد" value="${qty}">
+            <button type="button" class="btn-remove-row" onclick="removeInvItemRow(this)">X</button>
+        </div>`;
+    }
+
+    window.addInvItemRow = function() {
+        const container = document.getElementById('invDynamicItemsContainer');
+        let currentCount = container.querySelectorAll('.dynamic-item-row').length;
+        container.insertAdjacentHTML('beforeend', generateItemRowHtml('', '', '', currentCount));
+    };
+
+    window.openInventoryModal = function(editId = null, forceStatus = null, forceEmpName = null) {
+        window.__INV_EDIT_ID = editId;
+        const m = document.getElementById('modal'); 
+        const b = document.getElementById('modalBody'); 
+        m.style.display = 'flex';
+
+        let listObj = { empName: '', phone: '', address: '', note: '', date: new Date().toISOString().slice(0,10), status: 'warehouse', items: [{name:'', qty:'', type:''}] };
+        
+        if(editId) {
+            const found = window.inventoryData.find(x => x.id === editId);
+            if(found) {
+                listObj = { ...found };
+                if(!listObj.empName) listObj.empName = (listObj.emp || '').split('-')[0].trim();
+                if(!listObj.items) listObj.items = [{ name: listObj.name||'', qty: listObj.qty||'', type: listObj.type||'' }];
+            }
+        } else {
+            if(forceStatus) listObj.status = forceStatus;
+            if(forceEmpName && forceStatus === 'active') listObj.empName = forceEmpName;
+        }
+
+        let itemsInputsHtml = '';
+        listObj.items.forEach((itm, idx) => {
+            itemsInputsHtml += generateItemRowHtml(itm.name, itm.qty, itm.type, idx);
+        });
+
+        // 🔥 تم إضافة onClick للحماية من الخروج، وتحديث onchange 🔥
+        b.innerHTML = `
+            <h3 style="text-align:center; color:#1e293b; margin-bottom:15px;">${editId ? '✏️ تعديل القائمة' : '📑 قائمة سحب/إضافة جديدة'}</h3>
+            
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+                <div style="flex:1;"><label class="form-label">التاريخ</label><input id="invInpDate" type="date" class="app-input" style="margin:0;" value="${listObj.date}"></div>
+                <div style="flex:1;">
+                    <label class="form-label">الحالة</label>
+                    <select id="invInpStatus" class="app-input" style="margin:0; font-weight:bold;" onchange="toggleEmpFieldInv(event)" onclick="if(event && event.stopPropagation) event.stopPropagation();">
+                        <option value="warehouse" ${listObj.status === 'warehouse' ? 'selected' : ''}>🏢 في المخزن</option>
+                        <option value="active" ${listObj.status === 'active' ? 'selected' : ''}>🔴 مسحوبة (ذمة)</option>
+                        <option value="done" ${listObj.status === 'done' ? 'selected' : ''}>🟢 مستهلك/مرجع</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="emp-input-group" id="empFieldContainer" style="${(listObj.status === 'active' || listObj.status === 'done') ? 'display:block;' : 'display:none;'}">
+                <label class="form-label" style="color:#1e3a8a; font-size:0.9rem; margin-bottom:8px;">👤 بيانات المستلم</label>
+                <input id="invInpEmpName" class="app-input" style="margin-bottom:8px;" placeholder="الاسم (مثال: علي محمد)" value="${listObj.empName || ''}">
+                <input id="invInpEmpPhone" type="tel" class="app-input" style="margin-bottom:8px;" placeholder="رقم الهاتف (للواتساب)" value="${listObj.phone || ''}">
+                <input id="invInpEmpAddress" class="app-input" style="margin-bottom:0;" placeholder="عنوان الشخص/الموقع" value="${listObj.address || ''}">
+            </div>
+
+            <div style="background:#f1f5f9; padding:10px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:10px;">
+                <div style="margin-bottom:10px;">
+                    <label class="form-label" style="margin:0; color:#0f172a;">📦 المواد المسحوبة/المضافة</label>
+                </div>
+                
+                <div id="invDynamicItemsContainer">
+                    ${itemsInputsHtml}
+                </div>
+                
+                <button type="button" onclick="addInvItemRow()" style="background:#10b981; color:#fff; border:none; padding:8px 12px; border-radius:6px; font-weight:bold; font-size:0.9rem; cursor:pointer; width:100%; margin-top:5px;">➕ إضافة حقل مادة جديدة</button>
+            </div>
+
+            <div style="margin-top:5px;">
+                <label class="form-label">ملاحظات عامة للقائمة</label>
+                <textarea id="invInpNote" class="app-input" rows="2" placeholder="ملاحظات اضافية...">${listObj.note || ''}</textarea>
+            </div>
+
+            <button type="button" class="btn-main" style="background:#0284c7; margin-top:10px; font-weight:bold; font-size:1rem;" onclick="saveInventoryList()">حفظ القائمة 💾</button>
+            <button type="button" class="btn-main" style="background:#e2e8f0; color:#333; margin-top:8px;" onclick="document.getElementById('modal').style.display='none'">إلغاء ❌</button>
+        `;
+    };
+
+    window.saveInventoryList = function() {
+        const status = document.getElementById('invInpStatus').value;
+        const date = document.getElementById('invInpDate').value;
+        const note = document.getElementById('invInpNote').value.trim();
+        
+        let empName = document.getElementById('invInpEmpName')?.value.trim() || '';
+        let phone = document.getElementById('invInpEmpPhone')?.value.trim() || '';
+        let address = document.getElementById('invInpEmpAddress')?.value.trim() || '';
+
+        if(status === 'warehouse') { empName = ''; phone = ''; address = ''; } 
+        if((status === 'active' || status === 'done') && !empName) return alert('⚠️ الرجاء إدخال اسم المستلم!');
+
+        let items = [];
+        let hasErrors = false;
+        document.querySelectorAll('.dynamic-item-row').forEach(row => {
+            let n = row.querySelector('.i-name').value.trim();
+            let q = row.querySelector('.i-qty').value.trim();
+            let t = row.querySelector('.i-type').value.trim();
+            if(n && q) items.push({ name: n, qty: q, type: t });
+            else if (n || q) hasErrors = true; 
+        });
+
+        if(items.length === 0) return alert('⚠️ الرجاء إدخال مادة واحدة على الأقل!');
+        if(hasErrors) return alert('⚠️ يرجى التأكد من ملء (الاسم والعدد) لكل مادة تمت إضافتها!');
+
+        const id = window.__INV_EDIT_ID || 'inv_' + Date.now();
+        const payload = { 
+            items: items, 
+            empName: empName, 
+            emp: empName,
+            phone: phone, 
+            address: address, 
+            note: note, 
+            date: date, 
+            status: status, 
+            updatedAt: Date.now() 
+        };
+        
+        payload.name = "قائمة مواد (" + items.length + ")";
+        payload.qty = items.reduce((acc, curr) => acc + parseInt(curr.qty||0), 0);
+
+        if(!window.__INV_EDIT_ID) payload.createdAt = Date.now();
+
+        let actor = (typeof window.userName === 'function') ? window.userName() : 'System';
+
+        if(typeof db !== 'undefined' && db.ref) {
+            db.ref('inventory/' + id).update(payload).then(() => {
+                if(typeof window.__vipLog === 'function') {
+                    const actionTxt = window.__INV_EDIT_ID ? '✏️ تعديل قائمة جرد' : '📑 إضافة قائمة جرد';
+                    let detailsMsg = `تتضمن ${items.length} مواد | إجمالي القطع: ${payload.qty}`;
+                    if(empName) detailsMsg += ` | المستلم: ${empName}`;
+                    window.__vipLog(`${actionTxt}`, { action: 'inventory', by: actor, note: detailsMsg });
+                }
+                document.getElementById('modal').style.display = 'none';
+            });
+        }
+    };
+
+    window.deleteInventoryItem = function(id) {
+        if(!confirm(`هل أنت متأكد من حذف هذه القائمة نهائياً؟`)) return;
+        let actor = (typeof window.userName === 'function') ? window.userName() : 'System';
+        if(typeof db !== 'undefined' && db.ref) {
+            db.ref('inventory/' + id).remove().then(() => {
+                if(typeof window.__vipLog === 'function') window.__vipLog(`🗑️ حذف قائمة جرد`, { by: actor });
+            });
+        }
+    };
+
+    window.sendGroupWhatsApp = function(empName, e) {
+        if(e) { e.preventDefault(); e.stopPropagation(); } 
+
+        const groups = getInventoryGroups();
+        const g = groups[empName];
+        if(!g || g.lists.length === 0) return alert("لا توجد مواد لإرسالها");
+
+        let phone = g.phone ? fixPhoneForWA(g.phone) : null;
+        if(!phone) {
+            const manualPhone = prompt("لم يتم العثور على رقم هاتف.\nيرجى إدخال رقم الواتساب (مثال: 077...):");
+            if(manualPhone) phone = fixPhoneForWA(manualPhone);
+            if(!phone) return;
+        }
+
+        const activeLists = g.lists.filter(l => l.status === 'active');
+        if(activeLists.length === 0) return alert("لا توجد قوائم فعالة (بذمته) لإرسالها. جميع مواده مستهلكة.");
+
+        let msg = `مرحباً ${empName}،\n\n`;
+        msg += `📌 معلومات المستلم:\n`;
+        msg += `الاسم: ${empName}\n`;
+        msg += `الهاتف: ${g.phone || 'غير مسجل'}\n`;
+        if(g.address) msg += `العنوان: ${g.address}\n`;
+        msg += `\nنود إعلامك بأن القوائم والمواد التالية مسجلة كـ (ذمة) بحوزتك من مخزن شركة المسار للإنترنت:\n\n`;
+        
+        activeLists.sort((a,b) => new Date(a.date) - new Date(b.date)).forEach(list => {
+            msg += `📅 قائمة بتاريخ: ${list.date}\n`;
+            let arr = list.items ? list.items : [{name: list.name, qty: list.qty, type: list.type}];
+            
+            arr.forEach((i, idx) => {
+                let typeTxt = i.type ? ` | النوع: ${i.type}` : '';
+                msg += `   ${idx + 1}. 📦 ${i.name}${typeTxt} | العدد: ${i.qty}\n`;
+            });
+
+            if(list.note) msg += `   📝 ملاحظة: ${list.note}\n`;
+            msg += `──────────────\n`;
+        });
+
+        msg += `\nيرجى مراجعة المخزن في حال وجود أي اختلاف.\n\n- قسم المخازن`;
+        
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
+    window.printSingleVoucher = function(id) {
+        const list = window.inventoryData.find(x => x.id === id);
+        if(!list) return;
+
+        let itemsArray = list.items ? list.items : [{ name: list.name, qty: list.qty, type: list.type }];
+        let statusAr = list.status === 'warehouse' ? 'إدخال مخزني' : (list.status === 'active' ? 'وصل تسليم ذمة' : 'وصل استهلاك');
+        
+        let recipientInfo = list.empName || list.emp || 'المخزن الرئيسي';
+        if(list.phone) recipientInfo += ` | هاتف: ${list.phone}`;
+        if(list.address) recipientInfo += ` | عنوان: ${list.address}`;
+
+        let html = `
+            <div class="print-voucher-box">
+                <div style="text-align:center; border-bottom:2px solid #000; padding-bottom:10px; margin-bottom:15px;">
+                    <h2 style="margin:0 0 5px 0;">شركة المسار لخدمات الإنترنت</h2>
+                    <h3 style="margin:0;">${statusAr}</h3>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:15px; font-weight:bold; font-size:14px;">
+                    <div>المستلم/الجهة: ${recipientInfo}</div>
+                    <div style="direction:ltr;">التاريخ: ${list.date}</div>
+                </div>
+                <table class="inv-print-table">
+                    <thead><tr><th style="width:10%;">ت</th><th style="width:50%;">المادة والتفاصيل</th><th style="width:20%;">النوع</th><th style="width:20%;">العدد</th></tr></thead>
+                    <tbody>
+        `;
+
+        itemsArray.forEach((itm, idx) => {
+            html += `<tr><td>${idx+1}</td><td style="text-align:right;">${itm.name}</td><td>${itm.type||'-'}</td><td style="font-weight:bold;">${itm.qty}</td></tr>`;
+        });
+
+        html += `</tbody></table>`;
+        if(list.note) html += `<div style="margin-top:15px; font-size:14px; font-weight:bold;">الملاحظات: ${list.note}</div>`;
+        
+        html += `
+                <div style="display:flex; justify-content:space-between; margin-top:50px; font-weight:bold; font-size:14px;">
+                    <div style="text-align:center; border-top:1px dashed #000; padding-top:10px; width:150px;">توقيع المستلم</div>
+                    <div style="text-align:center; border-top:1px dashed #000; padding-top:10px; width:150px;">أمين المخزن</div>
+                </div>
+            </div>
+        `;
+
+        executePrint(html, `وصل_مخزن_${list.date}.pdf`);
+    };
+
+    window.printGroupAllVouchers = function(groupName) {
+        const groups = getInventoryGroups();
+        const g = groups[groupName];
+        if(!g || g.lists.length === 0) return;
+
+        let html = `
+            <div style="text-align:center; border-bottom:3px solid #000; padding-bottom:10px; margin-bottom:20px;">
+                <h2 style="margin:0 0 5px 0;">شركة المسار لخدمات الإنترنت</h2>
+                <h3 style="margin:0;">كشف حساب مخزني مفصل</h3>
+                <p style="margin:5px 0 0 0;">المستلم: <strong>${g.name}</strong> ${g.phone ? ' | '+g.phone : ''}</p>
+                ${g.address ? `<p style="margin:5px 0 0 0;">العنوان: ${g.address}</p>` : ''}
+                <p style="margin:5px 0 0 0;">تاريخ الكشف: ${new Date().toLocaleDateString('en-GB')}</p>
+            </div>
+        `;
+
+        let sortedLists = g.lists.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+        sortedLists.forEach(list => {
+            let itemsArray = list.items ? list.items : [{ name: list.name, qty: list.qty, type: list.type }];
+            let stat = list.status === 'warehouse' ? 'في المخزن' : (list.status === 'active' ? 'بذمته' : 'مستهلك/مرجع');
+            
+            html += `
+                <div style="margin-bottom:20px; border:1px solid #ccc; padding:10px; border-radius:6px;">
+                    <div style="display:flex; justify-content:space-between; font-weight:bold; margin-bottom:10px; border-bottom:1px dashed #ccc; padding-bottom:5px;">
+                        <span>📅 قائمة بتاريخ: <span style="direction:ltr; display:inline-block;">${list.date}</span></span>
+                        <span>الحالة: ${stat}</span>
+                    </div>
+                    <table class="inv-print-table" style="margin-top:0;">
+                        <thead><tr><th>ت</th><th>المادة</th><th>النوع</th><th>العدد</th></tr></thead>
+                        <tbody>
+            `;
+            itemsArray.forEach((itm, idx) => {
+                html += `<tr><td>${idx+1}</td><td style="text-align:right;">${itm.name}</td><td>${itm.type||'-'}</td><td style="font-weight:bold;">${itm.qty}</td></tr>`;
+            });
+            html += `</tbody></table>`;
+            if(list.note) html += `<div style="margin-top:5px; font-size:12px;">الملاحظات: ${list.note}</div>`;
+            html += `</div>`;
+        });
+
+        executePrint(html, `كشف_مخزن_${g.name}.pdf`);
+    };
+
+    function executePrint(htmlContent, filename) {
+        let printDiv = document.getElementById('temp-inv-pdf');
+        if(!printDiv){ printDiv = document.createElement('div'); printDiv.id = 'temp-inv-pdf'; document.body.appendChild(printDiv); }
+        printDiv.innerHTML = htmlContent; printDiv.style.display = 'block'; 
+        const opt = { margin: 10, filename: filename, image: { type: 'jpeg', quality: 1 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+        if(typeof html2pdf === 'function'){ html2pdf().set(opt).from(printDiv).save().then(() => { printDiv.style.display = 'none'; }); } 
+        else { alert("مكتبة PDF غير متوفرة حالياً!"); printDiv.style.display = 'none'; }
+    }
+
+    window.exportInventoryExcel = function() {
+        if(window.inventoryData.length === 0) return alert('لا توجد بيانات للتصدير');
+        let csv = '\ufeff' + "رقم القائمة,تاريخ القائمة,الحالة,المستلم,العنوان,رقم الهاتف,اسم المادة,النوع,العدد,ملاحظات القائمة\n";
+        
+        let filtered = window.inventoryData.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+        
+        filtered.forEach((list, index) => {
+            let statusAr = list.status === 'warehouse' ? 'في المخزن' : (list.status === 'active' ? 'بذمة' : 'مستهلك/تالف');
+            let itemsArray = list.items ? list.items : [{ name: list.name, qty: list.qty, type: list.type }];
+            let empName = list.empName || list.emp || '';
+            
+            itemsArray.forEach(itm => {
+                let row = [
+                    index + 1, list.date, statusAr, `"${empName.replace(/"/g, '""')}"`,
+                    `"${(list.address || '').replace(/"/g, '""')}"`, list.phone || '',
+                    `"${(itm.name || '').replace(/"/g, '""')}"`, `"${(itm.type || '').replace(/"/g, '""')}"`,
+                    itm.qty, `"${(list.note || '').replace(/"/g, '""')}"`
+                ];
+                csv += row.join(',') + '\n';
+            });
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `جرد_المخزن_الشامل.csv`; a.click(); URL.revokeObjectURL(url);
+    };
+
+    setTimeout(() => { injectInventoryView(); loadInventoryData(); safeEnforceDashboard(); }, 1000);
+    setInterval(safeEnforceDashboard, 1500);
+
+})();
+</script>
+<script>
+/* =========================================================
+   تحديث قائمة المصاريف (فلتر الأشهر الذكي - النسخة الجبارة)
+   ========================================================= */
+(function(){
+    function injectMonthFilter() {
+        const expView = document.getElementById('expensesView');
+        if(!expView || expView.style.display === 'none') return;
+
+        // 1. إخفاء حقول التاريخ الأصلية (من - إلى)
+        const dateInputs = expView.querySelectorAll('input[type="date"]');
+        dateInputs.forEach(inp => { inp.style.display = 'none'; });
+
+        // 2. زراعة قائمة الأشهر الذكية
+        if(!document.getElementById('expMonthSelect')) {
+            const searchBox = document.getElementById('expSearchBox') || expView.querySelector('input[placeholder*="اسم المصروف"]');
+            
+            if(searchBox) {
+                // إخفاء حاوية التواريخ القديمة لترتيب الشكل
+                const nextEl = searchBox.nextElementSibling;
+                if(nextEl && nextEl.tagName === 'DIV' && nextEl.querySelectorAll('input[type="date"]').length > 0) {
+                    nextEl.style.display = 'none';
+                }
+
+                // جلب الشهر الحالي تلقائياً
+                const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+                
+                const selectHTML = `
+                    <select id="expMonthSelect" class="app-input" style="margin-top:10px; font-weight:bold; color:#0f172a; background:#f1f5f9; border:1px solid #cbd5e1; text-align:center; font-size:1rem;">
+                        <option value="all">📅 عرض جميع الأشهر (الكل)</option>
+                        <option value="01">شهر 1 (يناير)</option>
+                        <option value="02">شهر 2 (فبراير)</option>
+                        <option value="03">شهر 3 (مارس)</option>
+                        <option value="04">شهر 4 (أبريل)</option>
+                        <option value="05">شهر 5 (مايو)</option>
+                        <option value="06">شهر 6 (يونيو)</option>
+                        <option value="07">شهر 7 (يوليو)</option>
+                        <option value="08">شهر 8 (أغسطس)</option>
+                        <option value="09">شهر 9 (سبتمبر)</option>
+                        <option value="10">شهر 10 (أكتوبر)</option>
+                        <option value="11">شهر 11 (نوفمبر)</option>
+                        <option value="12">شهر 12 (ديسمبر)</option>
+                    </select>
+                `;
+                searchBox.insertAdjacentHTML('afterend', selectHTML);
+                
+                const selectEl = document.getElementById('expMonthSelect');
+                selectEl.value = currentMonth; // تحديد الشهر الحالي كافتراضي
+
+                // تفعيل الفلترة عند تغيير الشهر
+                selectEl.addEventListener('change', applySmartFilter);
+                
+                // تشغيل الفلتر تلقائياً بعد ثانية من فتح الصفحة لضمان تحميل البيانات
+                setTimeout(applySmartFilter, 800);
+            }
+        }
+    }
+
+    // 3. دالة الفلترة المزدوجة (تخدع النظام الأصلي + تفلتر الشاشة)
+    function applySmartFilter() {
+        const selectEl = document.getElementById('expMonthSelect');
+        if(!selectEl) return;
+        
+        const selectedMonth = selectEl.value;
+        const expView = document.getElementById('expensesView');
+        if(!expView) return;
+
+        // [الطبقة الأولى]: حقن التواريخ في حقول النظام الأصلية
+        const dateInputs = expView.querySelectorAll('input[type="date"]');
+        if(dateInputs.length >= 2) {
+            const fromInput = dateInputs[0];
+            const toInput = dateInputs[1];
+
+            if(selectedMonth === 'all') {
+                fromInput.value = '';
+                toInput.value = '';
+            } else {
+                const year = new Date().getFullYear();
+                const start = `${year}-${selectedMonth}-01`;
+                const lastDay = new Date(year, parseInt(selectedMonth), 0).getDate();
+                const end = `${year}-${selectedMonth}-${lastDay}`;
+                
+                fromInput.value = start;
+                toInput.value = end;
+            }
+
+            // إيقاظ النظام الأصلي ليقرأ التواريخ الجديدة
+            fromInput.dispatchEvent(new Event('input', {bubbles: true}));
+            fromInput.dispatchEvent(new Event('change', {bubbles: true}));
+            toInput.dispatchEvent(new Event('input', {bubbles: true}));
+            toInput.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+
+        // تشغيل دالة العرض الأصلية
+        if (typeof window.renderExpenses === 'function') {
+            window.renderExpenses();
+        }
+
+        // [الطبقة الثانية]: الفلتر الإجباري للشاشة (لحساب المجموع المفلتر وعرض الكروت الصحيحة فقط)
+        setTimeout(() => { forceDOMFilter(selectedMonth); }, 150);
+    }
+
+    function forceDOMFilter(month) {
+        const expView = document.getElementById('expensesView');
+        if(!expView) return;
+
+        // البحث عن حاوية الكروت (المصاريف)
+        const listContainers = expView.querySelectorAll('.list-container, [id*="List"]');
+        let listContainer = null;
+        listContainers.forEach(c => { if(c.innerHTML.includes('د.ع')) listContainer = c; });
+        if(!listContainer) return;
+
+        let visibleTotal = 0;
+        let hasHiddenCards = false;
+
+        Array.from(listContainer.children).forEach(card => {
+            if (month === 'all') {
+                card.style.display = '';
+                const amtMatch = card.innerText.match(/([\d,\.]+)\s*د\.ع/);
+                if(amtMatch) visibleTotal += parseFloat(amtMatch[1].replace(/,/g, ''));
+                return;
+            }
+            
+            const text = card.innerText;
+            // البحث عن التاريخ داخل الكارت بأي صيغة (DD/MM/YYYY أو YYYY/MM/DD)
+            const dateMatch = text.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/) || text.match(/(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
+            let show = false;
+            
+            if(dateMatch) {
+                // استخراج الشهر (دائماً يكون الجروب الثاني حسب الـ Regex الفوك)
+                if(dateMatch[2] === month) show = true;
+            }
+
+            if(show) {
+                card.style.display = '';
+                const amtMatch = text.match(/([\d,\.]+)\s*د\.ع/);
+                if(amtMatch) {
+                    const num = parseFloat(amtMatch[1].replace(/,/g, ''));
+                    if(!isNaN(num)) visibleTotal += num;
+                }
+            } else {
+                card.style.display = 'none';
+                hasHiddenCards = true;
+            }
+        });
+
+        // إجبار مربع "المجموع المفلتر" على التحديث
+        if(hasHiddenCards || month === 'all') {
+            const allBoxes = expView.querySelectorAll('div, span, h3');
+            allBoxes.forEach(box => {
+                if(box.innerText.includes('المجموع المفلتر')) {
+                    const container = box.parentElement;
+                    if(container) {
+                        const valElements = container.querySelectorAll('h3, span, div');
+                        valElements.forEach(el => {
+                            // تغيير الرقم فقط (اللي يحتوي على فوارز)
+                            if(el !== box && el.innerText.match(/[\d,]+/)) {
+                                el.innerText = new Intl.NumberFormat('en-US').format(visibleTotal);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    }
+
+    // مراقبة الشاشة باستمرار للتأكد من عمل الفلتر حتى لو ضغطت أزرار أخرى (رواتب، إيجارات)
+    setInterval(() => {
+        injectMonthFilter();
+        const selectEl = document.getElementById('expMonthSelect');
+        if(selectEl && document.getElementById('expensesView').style.display !== 'none') {
+            // نطبق الفلتر الإجباري بهدوء للحفاظ على المجاميع الصحيحة
+            forceDOMFilter(selectEl.value);
+        }
+    }, 1000);
 
 })();
 </script>
